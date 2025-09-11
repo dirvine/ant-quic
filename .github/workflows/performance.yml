@@ -47,14 +47,14 @@ jobs:
       - name: Run baseline benchmarks
         run: |
           git checkout ${{ env.BASELINE_SHA }}
-          cargo bench --all-features -- --save-baseline baseline
+          cargo bench --all-features
 
       - name: Checkout PR
         run: git checkout ${{ github.sha }}
 
       - name: Run current benchmarks
         run: |
-          cargo bench --all-features -- --save-baseline current
+          cargo bench --all-features
 
       - name: Compare benchmarks
         id: compare
