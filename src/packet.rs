@@ -133,7 +133,10 @@ impl PartialDecode {
             ..
         }) = plain_header
         {
-            let number = Self::decrypt_header(&mut buf, header_crypto.unwrap())?;
+            let header_key = header_crypto.ok_or(PacketDecodeError::InvalidHeader(
+                "missing header protection key",
+            ))?;
+            let number = Self::decrypt_header(&mut buf, header_key)?;
             let header_len = buf.position() as usize;
             let mut bytes = buf.into_inner();
 
@@ -163,7 +166,12 @@ impl PartialDecode {
                 ty,
                 dst_cid,
                 src_cid,
-                number: Self::decrypt_header(&mut buf, header_crypto.unwrap())?,
+                number: Self::decrypt_header(
+                    &mut buf,
+                    header_crypto.ok_or(PacketDecodeError::InvalidHeader(
+                        "missing header protection key",
+                    ))?,
+                )?,
                 version,
             },
             Retry {
@@ -176,7 +184,10 @@ impl PartialDecode {
                 version,
             },
             Short { spin, dst_cid, .. } => {
-                let number = Self::decrypt_header(&mut buf, header_crypto.unwrap())?;
+                let header_key = header_crypto.ok_or(PacketDecodeError::InvalidHeader(
+                    "missing header protection key",
+                ))?;
+                let number = Self::decrypt_header(&mut buf, header_key)?;
                 let key_phase = buf.get_ref()[0] & KEY_PHASE_BIT != 0;
                 Header::Short {
                     spin,

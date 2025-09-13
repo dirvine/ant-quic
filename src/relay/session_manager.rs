@@ -7,10 +7,10 @@
 
 //! Session management for relay connections with complete state machine.
 
+use crate::crypto::raw_keys::MlDsaPublicKey;
 use crate::relay::{
     AuthToken, RelayAuthenticator, RelayConnection, RelayConnectionConfig, RelayError, RelayResult,
 };
-use ed25519_dalek::VerifyingKey;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -99,7 +99,7 @@ pub struct SessionManager {
     /// Authenticator for token verification
     authenticator: RelayAuthenticator,
     /// Trusted peer keys for authentication
-    trusted_keys: Arc<Mutex<HashMap<SocketAddr, VerifyingKey>>>,
+    trusted_keys: Arc<Mutex<HashMap<SocketAddr, MlDsaPublicKey>>>,
     /// Next session ID
     next_session_id: Arc<Mutex<SessionId>>,
     /// Event channels
@@ -165,44 +165,49 @@ pub enum ForwardDirection {
 
 impl SessionManager {
     /// Create a new session manager
-    pub fn new(config: SessionConfig) -> (Self, mpsc::UnboundedReceiver<SessionEvent>) {
+    pub fn try_new(config: SessionConfig) -> RelayResult<(Self, mpsc::UnboundedReceiver<SessionEvent>)> {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
         let manager = Self {
             config,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             connections: Arc::new(Mutex::new(HashMap::new())),
-            authenticator: RelayAuthenticator::new(),
+            authenticator: RelayAuthenticator::try_new()?,
             trusted_keys: Arc::new(Mutex::new(HashMap::new())),
             next_session_id: Arc::new(Mutex::new(1)),
             event_sender,
             last_cleanup: Arc::new(Mutex::new(Instant::now())),
         };
 
-        (manager, event_receiver)
+        Ok((manager, event_receiver))
     }
 
     /// Add a trusted peer key for authentication
-    pub fn add_trusted_key(&self, addr: SocketAddr, key: VerifyingKey) {
-        let mut trusted_keys = self.trusted_keys.lock().unwrap();
-        trusted_keys.insert(addr, key);
+    pub fn add_trusted_key(&self, addr: SocketAddr, key: MlDsaPublicKey) {
+        if let Ok(mut trusted_keys) = self.trusted_keys.lock() {
+            trusted_keys.insert(addr, key);
+        }
     }
 
     /// Remove a trusted peer key
     pub fn remove_trusted_key(&self, addr: &SocketAddr) {
-        let mut trusted_keys = self.trusted_keys.lock().unwrap();
-        trusted_keys.remove(addr);
+        if let Ok(mut trusted_keys) = self.trusted_keys.lock() {
+            trusted_keys.remove(addr);
+        }
     }
 
     /// Generate next session ID
     fn next_session_id(&self) -> SessionId {
-        let mut next_id = self.next_session_id.lock().unwrap();
-        let id = *next_id;
-        *next_id = next_id.wrapping_add(1);
-        if *next_id == 0 {
-            *next_id = 1; // Skip 0 as invalid session ID
+        if let Ok(mut next_id) = self.next_session_id.lock() {
+            let id = *next_id;
+            *next_id = next_id.wrapping_add(1);
+            if *next_id == 0 {
+                *next_id = 1; // Skip 0 as invalid session ID
+            }
+            id
+        } else {
+            1
         }
-        id
     }
 
     /// Request a new relay session
@@ -214,7 +219,10 @@ impl SessionManager {
     ) -> RelayResult<SessionId> {
         // Check session limit
         {
-            let sessions = self.sessions.lock().unwrap();
+            let sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             if sessions.len() >= self.config.max_sessions {
                 return Err(RelayError::ResourceExhausted {
                     resource_type: "sessions".to_string(),
@@ -225,7 +233,10 @@ impl SessionManager {
         }
 
         // Verify authentication token
-        let trusted_keys = self.trusted_keys.lock().unwrap();
+        let trusted_keys = self.trusted_keys.lock().map_err(|_| RelayError::NetworkError {
+            operation: "trusted_keys.lock".into(),
+            source: "mutex poisoned".into(),
+        })?;
         let peer_key =
             trusted_keys
                 .get(&client_addr)
@@ -255,7 +266,10 @@ impl SessionManager {
 
         // Store session
         {
-            let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+            operation: "sessions.lock".into(),
+            source: "mutex poisoned".into(),
+        })?;
             sessions.insert(session_id, session_info);
         }
 
@@ -273,7 +287,10 @@ impl SessionManager {
     /// Establish a relay session
     pub fn establish_session(&self, session_id: SessionId) -> RelayResult<()> {
         let (client_addr, bandwidth_limit) = {
-            let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+            operation: "sessions.lock".into(),
+            source: "mutex poisoned".into(),
+        })?;
             let session = sessions
                 .get_mut(&session_id)
                 .ok_or(RelayError::SessionError {
@@ -314,7 +331,10 @@ impl SessionManager {
 
         // Store connection
         {
-            let mut connections = self.connections.lock().unwrap();
+            let mut connections = self.connections.lock().map_err(|_| RelayError::NetworkError {
+                operation: "connections.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             connections.insert(session_id, Arc::new(connection));
         }
 
@@ -331,7 +351,10 @@ impl SessionManager {
     pub fn terminate_session(&self, session_id: SessionId, reason: String) -> RelayResult<()> {
         // Update session state
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             if let Some(session) = sessions.get_mut(&session_id) {
                 session.state = SessionState::Terminated;
                 session.last_activity = Instant::now();
@@ -340,7 +363,10 @@ impl SessionManager {
 
         // Terminate connection
         {
-            let mut connections = self.connections.lock().unwrap();
+            let mut connections = self.connections.lock().map_err(|_| RelayError::NetworkError {
+                operation: "connections.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             if let Some(connection) = connections.remove(&session_id) {
                 let _ = connection.terminate(reason.clone());
             }
@@ -362,7 +388,10 @@ impl SessionManager {
         direction: ForwardDirection,
     ) -> RelayResult<()> {
         let connection = {
-            let connections = self.connections.lock().unwrap();
+            let connections = self.connections.lock().map_err(|_| RelayError::NetworkError {
+                operation: "connections.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             connections
                 .get(&session_id)
                 .cloned()
@@ -384,7 +413,10 @@ impl SessionManager {
 
         // Update session statistics
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             if let Some(session) = sessions.get_mut(&session_id) {
                 session.last_activity = Instant::now();
                 match direction {
@@ -410,25 +442,36 @@ impl SessionManager {
 
     /// Get session information
     pub fn get_session(&self, session_id: SessionId) -> Option<RelaySessionInfo> {
-        let sessions = self.sessions.lock().unwrap();
+        let sessions = match self.sessions.lock() {
+            Ok(guard) => guard,
+            Err(_) => return None,
+        };
         sessions.get(&session_id).cloned()
     }
 
     /// List all active sessions
     pub fn list_sessions(&self) -> Vec<RelaySessionInfo> {
-        let sessions = self.sessions.lock().unwrap();
+        let sessions = match self.sessions.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Vec::new(),
+        };
         sessions.values().cloned().collect()
     }
 
     /// Get session count
     pub fn session_count(&self) -> usize {
-        let sessions = self.sessions.lock().unwrap();
-        sessions.len()
+        match self.sessions.lock() {
+            Ok(guard) => guard.len(),
+            Err(_) => 0,
+        }
     }
 
     /// Clean up expired sessions
     pub fn cleanup_expired_sessions(&self) -> RelayResult<usize> {
-        let mut last_cleanup = self.last_cleanup.lock().unwrap();
+        let mut last_cleanup = self.last_cleanup.lock().map_err(|_| RelayError::NetworkError {
+            operation: "last_cleanup.lock".into(),
+            source: "mutex poisoned".into(),
+        })?;
         let now = Instant::now();
 
         // Only cleanup if enough time has passed
@@ -443,7 +486,10 @@ impl SessionManager {
 
         // Find expired sessions
         {
-            let sessions = self.sessions.lock().unwrap();
+            let sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             for (session_id, session_info) in sessions.iter() {
                 let age = now.duration_since(session_info.last_activity);
                 if age > session_info.timeout {
@@ -458,7 +504,10 @@ impl SessionManager {
             let _ = self.terminate_session(session_id, "Session expired".to_string());
 
             // Remove from sessions map
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             sessions.remove(&session_id);
         }
 
@@ -467,8 +516,14 @@ impl SessionManager {
 
     /// Get session manager statistics
     pub fn get_statistics(&self) -> SessionManagerStats {
-        let sessions = self.sessions.lock().unwrap();
-        let connections = self.connections.lock().unwrap();
+        let sessions = match self.sessions.lock() {
+            Ok(guard) => guard,
+            Err(_) => return SessionManagerStats::default(),
+        };
+        let connections = match self.connections.lock() {
+            Ok(guard) => guard,
+            Err(_) => return SessionManagerStats::default(),
+        };
 
         let mut active_count = 0;
         let mut pending_count = 0;
@@ -497,7 +552,7 @@ impl SessionManager {
 }
 
 /// Session manager statistics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SessionManagerStats {
     /// Total number of sessions tracked
     pub total_sessions: usize,
@@ -516,9 +571,8 @@ pub struct SessionManagerStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::raw_keys::MlDsaKeyPair;
     use crate::relay::AuthToken;
-    use ed25519_dalek::SigningKey;
-    use rand::rngs::OsRng;
     use std::net::{IpAddr, Ipv4Addr};
 
     fn test_addr() -> SocketAddr {
@@ -528,7 +582,7 @@ mod tests {
     #[test]
     fn test_session_manager_creation() {
         let config = SessionConfig::default();
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
         let stats = manager.get_statistics();
         assert_eq!(stats.total_sessions, 0);
@@ -538,16 +592,16 @@ mod tests {
     #[test]
     fn test_trusted_key_management() {
         let config = SessionConfig::default();
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key);
 
         // Should be able to create a session with trusted key
-        let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+        let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
         let result = manager.request_session(addr, vec![1, 2, 3], auth_token);
         assert!(result.is_ok());
 
@@ -555,7 +609,7 @@ mod tests {
         manager.remove_trusted_key(&addr);
 
         // Should fail without trusted key
-        let auth_token2 = AuthToken::new(1024, 300, &signing_key).unwrap();
+        let auth_token2 = AuthToken::new(1024, 300, &keypair).unwrap();
         let result2 = manager.request_session(addr, vec![4, 5, 6], auth_token2);
         assert!(result2.is_err());
     }
@@ -563,16 +617,16 @@ mod tests {
     #[test]
     fn test_session_request_and_establishment() {
         let config = SessionConfig::default();
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key);
 
         // Request session
-        let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+        let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
         let session_id = manager
             .request_session(addr, vec![1, 2, 3], auth_token)
             .unwrap();
@@ -594,23 +648,23 @@ mod tests {
     fn test_session_limit() {
         let mut config = SessionConfig::default();
         config.max_sessions = 2;
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key);
 
         // Create maximum sessions
         for i in 0..2 {
-            let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+            let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
             let result = manager.request_session(addr, vec![i], auth_token);
             assert!(result.is_ok());
         }
 
         // Third session should fail
-        let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+        let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
         let result = manager.request_session(addr, vec![3], auth_token);
         assert!(result.is_err());
     }
@@ -618,16 +672,16 @@ mod tests {
     #[test]
     fn test_session_termination() {
         let config = SessionConfig::default();
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key);
 
         // Create and establish session
-        let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+        let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
         let session_id = manager
             .request_session(addr, vec![1, 2, 3], auth_token)
             .unwrap();
@@ -645,16 +699,16 @@ mod tests {
     #[test]
     fn test_data_forwarding() {
         let config = SessionConfig::default();
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key);
 
         // Create and establish session
-        let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+        let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
         let session_id = manager
             .request_session(addr, vec![1, 2, 3], auth_token)
             .unwrap();
@@ -683,16 +737,16 @@ mod tests {
     fn test_session_cleanup() {
         let mut config = SessionConfig::default();
         config.cleanup_interval = Duration::from_millis(1);
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key.clone());
 
         // Create session with very short timeout
-        let auth_token = AuthToken::new(1024, 0, &signing_key).unwrap(); // 0 second timeout (expires immediately)
+        let auth_token = AuthToken::new(1024, 0, &keypair).unwrap(); // 0 second timeout (expires immediately)
         let _session_id = manager
             .request_session(addr, vec![1, 2, 3], auth_token)
             .unwrap();
@@ -710,18 +764,18 @@ mod tests {
     #[test]
     fn test_session_id_generation() {
         let config = SessionConfig::default();
-        let (manager, _event_rx) = SessionManager::new(config);
+        let (manager, _event_rx) = SessionManager::try_new(config).unwrap();
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let addr = test_addr();
 
-        manager.add_trusted_key(addr, verifying_key);
+        manager.add_trusted_key(addr, public_key);
 
         // Generate multiple session IDs
         let mut session_ids = Vec::new();
         for i in 0..10 {
-            let auth_token = AuthToken::new(1024, 300, &signing_key).unwrap();
+            let auth_token = AuthToken::new(1024, 300, &keypair).unwrap();
             let session_id = manager.request_session(addr, vec![i], auth_token).unwrap();
             session_ids.push(session_id);
         }

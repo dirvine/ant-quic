@@ -75,7 +75,13 @@ impl TokenLog for BloomTokenLog {
             return Err(TokenReuseError);
         }
 
-        let mut guard = self.0.lock().unwrap();
+        let mut guard = match self.0.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                warn!("BloomTokenLog lock poisoned");
+                return Err(TokenReuseError);
+            }
+        };
         let state = &mut *guard;
 
         // calculate how many periods past period 1 the token expires

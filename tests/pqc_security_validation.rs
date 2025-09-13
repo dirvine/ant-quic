@@ -1,6 +1,5 @@
 //! Comprehensive security validation tests for PQC implementation
 
-#![cfg(feature = "pqc")]
 
 use ant_quic::crypto::pqc::{
     MlDsaOperations, MlKemOperations,

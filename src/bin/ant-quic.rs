@@ -12,9 +12,7 @@
 
 use ant_quic::{
     chat::ChatMessage,
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair,
-    },
+    crypto::raw_keys::{derive_peer_id_from_public_key, generate_ml_dsa_keypair},
     high_level,
     nat_traversal_api::{EndpointRole, NatTraversalEvent, PeerId},
     quic_node::{QuicNodeConfig, QuicP2PNode},
@@ -429,8 +427,9 @@ struct QuicDemoNode {
 impl QuicDemoNode {
     /// Create a new QUIC demo node
     async fn new(args: Args) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Generate Ed25519 keypair and derive peer ID
-        let (_private_key, public_key) = generate_ed25519_keypair();
+        // Generate ML-DSA keypair and derive peer ID
+        let keypair = generate_ml_dsa_keypair()?;
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         info!("Generated peer ID: {:?}", peer_id);
@@ -510,7 +509,7 @@ impl QuicDemoNode {
 
         Ok(Self {
             quic_node,
-            peer_id,
+            peer_id: PeerId(peer_id),
             nickname,
             connected_peers: Arc::new(Mutex::new(std::collections::HashMap::new())),
             message_history: Arc::new(Mutex::new(Vec::new())),

@@ -5,10 +5,8 @@
 //
 // Full details available at https://saorsalabs.com/licenses
 
-#[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
+// Always use aws-lc-rs for PQC-only implementation
 use aws_lc_rs::{aead, error, hkdf, hmac};
-#[cfg(feature = "ring")]
-use ring::{aead, error, hkdf, hmac};
 
 use crate::crypto::{self, CryptoError};
 
@@ -26,14 +24,14 @@ impl crypto::HmacKey for hmac::Key {
     }
 }
 
+// HKDF expansion in this context is infallible with fixed algorithm/length; suppress unwrap lint
+#[allow(clippy::unwrap_used)]
 impl crypto::HandshakeTokenKey for hkdf::Prk {
     fn aead_from_hkdf(&self, random_bytes: &[u8]) -> Box<dyn crypto::AeadKey> {
         let mut key_buffer = [0u8; 32];
         let info = [random_bytes];
         let okm = self.expand(&info, hkdf::HKDF_SHA256).unwrap();
-
         okm.fill(&mut key_buffer).unwrap();
-
         let key = aead::UnboundKey::new(&aead::AES_256_GCM, &key_buffer).unwrap();
         Box::new(aead::LessSafeKey::new(key))
     }

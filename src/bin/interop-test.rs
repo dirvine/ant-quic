@@ -170,21 +170,8 @@ async fn test_endpoint(
     let endpoint = Endpoint::new(ant_quic::EndpointConfig::default(), None, socket, runtime)?;
 
     // Create client config
-    #[cfg(feature = "platform-verifier")]
-    let client_config = ant_quic::ClientConfig::try_with_platform_verifier().unwrap_or_else(|_| {
-        // Fallback to empty roots if platform verifier not available
-        let roots = rustls::RootCertStore::empty();
-        let crypto = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        ant_quic::ClientConfig::new(Arc::new(
-            ant_quic::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap(),
-        ))
-    });
-
-    #[cfg(not(feature = "platform-verifier"))]
     let client_config = {
-        // Use empty roots when platform verifier not available
+        // Use empty roots
         let roots = rustls::RootCertStore::empty();
         let crypto = rustls::ClientConfig::builder()
             .with_root_certificates(roots)

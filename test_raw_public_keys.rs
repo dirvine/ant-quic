@@ -8,8 +8,8 @@
 //! 4. TLS integration compiles
 
 use ant_quic::crypto::raw_public_keys::{
-    RawPublicKeyVerifier, RawPublicKeyResolver, create_ed25519_subject_public_key_info,
-    RawPublicKeyConfigBuilder, utils::*,
+    RawPublicKeyVerifier, RawPublicKeyResolver, create_ml_dsa_subject_public_key_info,
+    RawPublicKeyConfigBuilder, key_utils::*,
 };
 use ant_quic::crypto::tls_extensions::{
     CertificateType, CertificateTypeList, CertificateTypePreferences, NegotiationResult,
@@ -19,16 +19,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔐 Testing Raw Public Keys Implementation");
     
     // Test 1: Key generation
-    println!("\n1. Testing Ed25519 key generation...");
-    let (private_key, public_key) = generate_ed25519_keypair();
+    println!("\n1. Testing ML-DSA key generation...");
+    let keypair = generate_ml_dsa_keypair();
+    let public_key = keypair.public_key();
     let key_bytes = public_key_to_bytes(&public_key);
     println!("✅ Generated Ed25519 keypair: {}", hex::encode(&key_bytes));
     
     // Test 2: SubjectPublicKeyInfo encoding
-    println!("\n2. Testing SubjectPublicKeyInfo encoding...");
-    let spki = create_ed25519_subject_public_key_info(&public_key);
+    println!("\n2. Testing SubjectPublicKeyInfo encoding (ML-DSA)...");
+    let spki = create_ml_dsa_subject_public_key_info(&public_key);
     println!("✅ Created SPKI ({} bytes): {}", spki.len(), hex::encode(&spki[..20]));
-    assert_eq!(spki.len(), 44, "SPKI should be 44 bytes");
+    assert!(spki.len() > 1952, "SPKI should wrap the 1952-byte ML-DSA key");
     
     // Test 3: Certificate type negotiation
     println!("\n3. Testing certificate type negotiation...");
@@ -55,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n5. Testing configuration builder...");
     let config_builder = RawPublicKeyConfigBuilder::new()
         .add_trusted_key(key_bytes)
-        .with_server_key(private_key.clone())
+        .with_server_key(keypair)
         .enable_certificate_type_extensions();
     
     println!("✅ Created configuration builder");

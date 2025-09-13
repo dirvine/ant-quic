@@ -21,9 +21,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     auth::{AuthConfig, AuthManager, AuthMessage, AuthProtocol},
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair,
-    },
+    crypto::raw_public_keys::key_utils::{derive_peer_id_from_public_key, generate_ml_dsa_keypair},
     nat_traversal_api::{
         EndpointRole, NatTraversalConfig, NatTraversalEndpoint, NatTraversalError,
         NatTraversalEvent, NatTraversalStatistics, PeerId,
@@ -132,13 +130,17 @@ impl QuicP2PNode {
         config: QuicNodeConfig,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Generate Ed25519 keypair for authentication
-        let (secret_key, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         info!("Creating QUIC P2P node with peer ID: {:?}", peer_id);
 
         // Create authentication manager
-        let auth_manager = Arc::new(AuthManager::new(secret_key, config.auth_config.clone()));
+        let auth_manager = Arc::new(AuthManager::new(
+            keypair.clone(),
+            config.auth_config.clone(),
+        ));
 
         // Create NAT traversal configuration
         let nat_config = NatTraversalConfig {
@@ -729,7 +731,7 @@ impl QuicP2PNode {
     }
 
     /// Get this node's public key bytes
-    pub fn public_key_bytes(&self) -> [u8; 32] {
+    pub fn public_key_bytes(&self) -> Vec<u8> {
         self.auth_manager.public_key_bytes()
     }
 

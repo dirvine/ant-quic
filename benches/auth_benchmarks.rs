@@ -4,9 +4,7 @@
 
 use ant_quic::{
     auth::{AuthConfig, AuthManager, AuthMessage},
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair, public_key_to_bytes,
-    },
+    crypto::raw_public_keys::key_utils::{derive_peer_id_from_public_key, generate_ml_dsa_keypair, public_key_to_bytes},
 };
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::{sync::Arc, time::Duration};
@@ -18,13 +16,15 @@ fn bench_key_generation(c: &mut Criterion) {
 
     group.bench_function("generate_keypair", |b| {
         b.iter(|| {
-            let (secret_key, public_key) = generate_ed25519_keypair();
-            black_box((secret_key, public_key))
+            let keypair = generate_ml_dsa_keypair();
+            let public_key = keypair.public_key();
+            black_box((keypair, public_key))
         });
     });
 
     group.bench_function("derive_peer_id", |b| {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         b.iter(|| {
             let peer_id = derive_peer_id_from_public_key(&public_key);
             black_box(peer_id)
@@ -33,9 +33,10 @@ fn bench_key_generation(c: &mut Criterion) {
 
     group.bench_function("full_identity_generation", |b| {
         b.iter(|| {
-            let (secret_key, public_key) = generate_ed25519_keypair();
+            let keypair = generate_ml_dsa_keypair();
+            let public_key = keypair.public_key();
             let peer_id = derive_peer_id_from_public_key(&public_key);
-            black_box((secret_key, public_key, peer_id))
+            black_box((keypair, public_key, peer_id))
         });
     });
 
@@ -48,8 +49,8 @@ fn bench_auth_manager_creation(c: &mut Criterion) {
 
     group.bench_function("create_default", |b| {
         b.iter(|| {
-            let (secret_key, _) = generate_ed25519_keypair();
-            let auth_manager = AuthManager::new(secret_key, AuthConfig::default());
+            let keypair = generate_ml_dsa_keypair();
+            let auth_manager = AuthManager::new(keypair, AuthConfig::default());
             black_box(auth_manager)
         });
     });
@@ -63,8 +64,8 @@ fn bench_auth_manager_creation(c: &mut Criterion) {
         };
 
         b.iter(|| {
-            let (secret_key, _) = generate_ed25519_keypair();
-            let auth_manager = AuthManager::new(secret_key, config.clone());
+            let keypair = generate_ml_dsa_keypair();
+            let auth_manager = AuthManager::new(keypair, config.clone());
             black_box(auth_manager)
         });
     });
@@ -78,9 +79,10 @@ fn bench_auth_messages(c: &mut Criterion) {
     let mut group = c.benchmark_group("auth_messages");
 
     // Setup
-    let (secret_key, public_key) = generate_ed25519_keypair();
+    let keypair = generate_ml_dsa_keypair();
+    let public_key = keypair.public_key();
     let peer_id = derive_peer_id_from_public_key(&public_key);
-    let auth_manager = Arc::new(AuthManager::new(secret_key, AuthConfig::default()));
+    let auth_manager = Arc::new(AuthManager::new(keypair, AuthConfig::default()));
 
     group.bench_function("create_auth_request", |b| {
         b.iter(|| {
@@ -90,15 +92,17 @@ fn bench_auth_messages(c: &mut Criterion) {
     });
 
     group.bench_function("handle_auth_request", |b| {
-        let (_peer_secret, peer_public) = generate_ed25519_keypair();
+        let peer_keypair = generate_ml_dsa_keypair();
+        let peer_public = peer_keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&peer_public);
         let public_key_bytes = public_key_to_bytes(&peer_public);
 
         b.iter(|| {
             let auth_manager = auth_manager.clone();
+            let public_key_bytes = public_key_bytes.clone();
             rt.block_on(async move {
                 let result = auth_manager
-                    .handle_auth_request(peer_id, public_key_bytes)
+                    .handle_auth_request(peer_id, &public_key_bytes)
                     .await;
                 black_box(result)
             })
@@ -124,17 +128,15 @@ fn bench_auth_messages(c: &mut Criterion) {
             _ => panic!("Expected ChallengeResponse"),
         };
 
+        let public_key_bytes = public_key_to_bytes(&public_key);
+
         b.iter(|| {
             let auth_manager = auth_manager.clone();
             let signature = signature.clone();
+            let public_key_bytes = public_key_bytes.clone();
             rt.block_on(async move {
                 let result = auth_manager
-                    .verify_challenge_response(
-                        peer_id,
-                        public_key_to_bytes(&public_key),
-                        nonce,
-                        &signature,
-                    )
+                    .verify_challenge_response(peer_id, &public_key_bytes, nonce, &signature)
                     .await;
                 black_box(result)
             })
@@ -153,14 +155,16 @@ fn bench_auth_flow(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 // Create two peers
-                let (alice_secret, alice_public) = generate_ed25519_keypair();
-                let (bob_secret, bob_public) = generate_ed25519_keypair();
+                let alice_keypair = generate_ml_dsa_keypair();
+                let alice_public = alice_keypair.public_key();
+                let bob_keypair = generate_ml_dsa_keypair();
+                let bob_public = bob_keypair.public_key();
 
                 let alice_id = derive_peer_id_from_public_key(&alice_public);
                 let _bob_id = derive_peer_id_from_public_key(&bob_public);
 
-                let alice_auth = AuthManager::new(alice_secret, AuthConfig::default());
-                let bob_auth = AuthManager::new(bob_secret, AuthConfig::default());
+                let alice_auth = AuthManager::new(alice_keypair, AuthConfig::default());
+                let bob_auth = AuthManager::new(bob_keypair, AuthConfig::default());
 
                 // Step 1: Alice creates auth request
                 let auth_request = alice_auth.create_auth_request();
@@ -172,7 +176,7 @@ fn bench_auth_flow(c: &mut Criterion) {
                         public_key,
                         ..
                     } => bob_auth
-                        .handle_auth_request(peer_id, public_key)
+                        .handle_auth_request(peer_id, &public_key)
                         .await
                         .unwrap(),
                     _ => panic!("Expected AuthRequest"),
@@ -194,7 +198,7 @@ fn bench_auth_flow(c: &mut Criterion) {
                         bob_auth
                             .verify_challenge_response(
                                 alice_id,
-                                public_key_to_bytes(&alice_public),
+                                &public_key_to_bytes(&alice_public),
                                 nonce,
                                 &signature,
                             )
@@ -225,9 +229,9 @@ fn bench_concurrent_auth(c: &mut Criterion) {
             |b, &peer_count| {
                 b.iter(|| {
                     rt.block_on(async {
-                        let (secret_key, _) = generate_ed25519_keypair();
+                        let keypair = generate_ml_dsa_keypair();
                         let auth_manager =
-                            Arc::new(AuthManager::new(secret_key, AuthConfig::default()));
+                            Arc::new(AuthManager::new(keypair, AuthConfig::default()));
 
                         // Create multiple peers trying to authenticate
                         let mut tasks = Vec::new();
@@ -236,11 +240,15 @@ fn bench_concurrent_auth(c: &mut Criterion) {
                             let auth_clone = auth_manager.clone();
 
                             let task = tokio::spawn(async move {
-                                let (_peer_secret, peer_public) = generate_ed25519_keypair();
+                                let peer_keypair = generate_ml_dsa_keypair();
+                                let peer_public = peer_keypair.public_key();
                                 let peer_id = derive_peer_id_from_public_key(&peer_public);
 
                                 auth_clone
-                                    .handle_auth_request(peer_id, public_key_to_bytes(&peer_public))
+                                    .handle_auth_request(
+                                        peer_id,
+                                        &public_key_to_bytes(&peer_public),
+                                    )
                                     .await
                             });
 
@@ -265,7 +273,8 @@ fn bench_concurrent_auth(c: &mut Criterion) {
 fn bench_message_serialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("serialization");
 
-    let (_, public_key) = generate_ed25519_keypair();
+    let keypair = generate_ml_dsa_keypair();
+    let public_key = keypair.public_key();
     let peer_id = derive_peer_id_from_public_key(&public_key);
 
     let messages = vec![
@@ -345,24 +354,26 @@ fn bench_peer_management(c: &mut Criterion) {
     let mut group = c.benchmark_group("peer_management");
 
     // Setup auth manager with many authenticated peers
-    let (secret_key, _) = generate_ed25519_keypair();
-    let auth_manager = Arc::new(AuthManager::new(secret_key, AuthConfig::default()));
+    let keypair = generate_ml_dsa_keypair();
+    let auth_manager = Arc::new(AuthManager::new(keypair, AuthConfig::default()));
 
     // Pre-populate with authenticated peers
     rt.block_on(async {
         for _i in 0..1000 {
-            let (_, peer_public) = generate_ed25519_keypair();
+            let peer_keypair = generate_ml_dsa_keypair();
+            let peer_public = peer_keypair.public_key();
             let peer_id = derive_peer_id_from_public_key(&peer_public);
 
             // Simulate adding authenticated peer
             let _ = auth_manager
-                .handle_auth_request(peer_id, public_key_to_bytes(&peer_public))
+                .handle_auth_request(peer_id, &public_key_to_bytes(&peer_public))
                 .await;
         }
     });
 
     group.bench_function("is_authenticated_check", |b| {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         b.iter(|| {

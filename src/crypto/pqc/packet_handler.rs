@@ -19,10 +19,18 @@
 use crate::{
     MAX_UDP_PAYLOAD, MtuDiscoveryConfig, TransportError,
     connection::Connection,
-    crypto::pqc::{config::PqcMode, types::*},
+    crypto::pqc::types::*,
     frame::{self, Crypto},
     packet::{PacketNumber, SpaceId},
 };
+
+/// PQC operation mode
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PqcMode {
+    ClassicalOnly,
+    PqcOnly,
+    Hybrid,
+}
 use std::cmp;
 use tracing::{debug, trace};
 
@@ -273,7 +281,7 @@ pub trait PqcPacketHandling {
     fn get_pqc_optimal_packet_size(&self, space: SpaceId) -> u16;
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

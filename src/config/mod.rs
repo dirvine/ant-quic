@@ -286,14 +286,11 @@ impl fmt::Debug for EndpointConfig {
     }
 }
 
-#[cfg(any(feature = "aws-lc-rs", feature = "ring"))]
+#[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
 impl Default for EndpointConfig {
     fn default() -> Self {
-        #[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
         use aws_lc_rs::hmac;
         use rand::RngCore;
-        #[cfg(feature = "ring")]
-        use ring::hmac;
 
         let mut reset_key = [0; 64];
         rand::thread_rng().fill_bytes(&mut reset_key);
@@ -494,23 +491,19 @@ impl ServerConfig {
         cert_chain: Vec<CertificateDer<'static>>,
         key: PrivateKeyDer<'static>,
     ) -> Result<Self, rustls::Error> {
-        Ok(Self::with_crypto(Arc::new(QuicServerConfig::new(
-            cert_chain, key,
-        )?)))
+        let crypto = Arc::new(QuicServerConfig::new(cert_chain, key)?);
+        Ok(Self::with_crypto(crypto as Arc<dyn crypto::ServerConfig>))
     }
 }
 
-#[cfg(any(feature = "aws-lc-rs", feature = "ring"))]
+#[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
 impl ServerConfig {
     /// Create a server config with the given [`crypto::ServerConfig`]
     ///
     /// Uses a randomized handshake token key.
     pub fn with_crypto(crypto: Arc<dyn crypto::ServerConfig>) -> Self {
-        #[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
         use aws_lc_rs::hkdf;
         use rand::RngCore;
-        #[cfg(feature = "ring")]
-        use ring::hkdf;
 
         let rng = &mut rand::thread_rng();
         let mut master_key = [0u8; 64];
@@ -729,21 +722,6 @@ impl ClientConfig {
 
 #[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
 impl ClientConfig {
-    /// Create a client configuration that trusts the platform's native roots
-    #[deprecated(since = "0.11.13", note = "use `try_with_platform_verifier()` instead")]
-    #[cfg(feature = "platform-verifier")]
-    pub fn with_platform_verifier() -> Self {
-        Self::try_with_platform_verifier().expect("use try_with_platform_verifier() instead")
-    }
-
-    /// Create a client configuration that trusts the platform's native roots
-    #[cfg(feature = "platform-verifier")]
-    pub fn try_with_platform_verifier() -> Result<Self, rustls::Error> {
-        Ok(Self::new(Arc::new(
-            crypto::rustls::QuicClientConfig::with_platform_verifier()?,
-        )))
-    }
-
     /// Create a client configuration that trusts specified trust anchors
     pub fn with_root_certificates(
         roots: Arc<rustls::RootCertStore>,

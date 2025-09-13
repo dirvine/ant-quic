@@ -18,21 +18,21 @@
 use crate::crypto::pqc::MlKemOperations;
 use crate::crypto::pqc::types::*;
 
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use aws_lc_rs::kem::{
     Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, ML_KEM_768,
     SharedSecret as AwsSharedSecret,
 };
 
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use std::collections::HashMap;
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use std::time::{Duration, Instant};
 
 /// Cached key entry with timestamp
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 struct CachedKey {
     key: Arc<DecapsulationKey>,
     created_at: Instant,
@@ -40,11 +40,11 @@ struct CachedKey {
 
 /// ML-KEM-768 implementation using aws-lc-rs
 pub struct MlKem768Impl {
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     algorithm: &'static Algorithm,
     /// Temporary key storage - maps secret key bytes to DecapsulationKey
     /// In production, this should be replaced with proper key management
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     key_cache: Arc<Mutex<HashMap<Vec<u8>, CachedKey>>>,
 }
 
@@ -52,9 +52,9 @@ impl MlKem768Impl {
     /// Create a new ML-KEM-768 implementation
     pub fn new() -> Self {
         Self {
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             algorithm: &ML_KEM_768,
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             key_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -63,7 +63,7 @@ impl MlKem768Impl {
     ///
     /// This should be called periodically to prevent memory leaks.
     /// Removes entries older than the specified duration.
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     pub fn cleanup_cache(&self, max_age: Duration) {
         if let Ok(mut cache) = self.key_cache.lock() {
             let now = Instant::now();
@@ -72,13 +72,13 @@ impl MlKem768Impl {
     }
 
     /// Get the current size of the key cache
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     pub fn cache_size(&self) -> usize {
         self.key_cache.lock().map(|cache| cache.len()).unwrap_or(0)
     }
 
     /// Clear all entries from the key cache
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     pub fn clear_cache(&self) {
         if let Ok(mut cache) = self.key_cache.lock() {
             cache.clear();
@@ -89,15 +89,15 @@ impl MlKem768Impl {
 impl Clone for MlKem768Impl {
     fn clone(&self) -> Self {
         Self {
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             algorithm: self.algorithm,
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             key_cache: Arc::clone(&self.key_cache),
         }
     }
 }
 
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 impl MlKemOperations for MlKem768Impl {
     fn generate_keypair(&self) -> PqcResult<(MlKemPublicKey, MlKemSecretKey)> {
         // Generate a decapsulation (private) key
@@ -241,7 +241,7 @@ impl MlKemOperations for MlKem768Impl {
 }
 
 // Fallback implementation when aws-lc-rs is not available
-#[cfg(not(feature = "aws-lc-rs"))]
+#[cfg(not(feature = "rustls-aws-lc-rs"))]
 impl MlKemOperations for MlKem768Impl {
     fn generate_keypair(&self) -> PqcResult<(MlKemPublicKey, MlKemSecretKey)> {
         // Without aws-lc-rs, we can't provide real ML-KEM
@@ -279,12 +279,12 @@ impl MlKemOperations for MlKem768Impl {
     }
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_ml_kem_768_key_generation() {
         let ml_kem = MlKem768Impl::new();
         let result = ml_kem.generate_keypair();
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_ml_kem_768_roundtrip() {
         let ml_kem = MlKem768Impl::new();
 
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_ml_kem_768_sizes() {
         let ml_kem = MlKem768Impl::new();
 
@@ -333,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "aws-lc-rs"))]
+    #[cfg(not(feature = "rustls-aws-lc-rs"))]
     fn test_ml_kem_without_feature() {
         let ml_kem = MlKem768Impl::new();
 

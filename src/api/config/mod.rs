@@ -16,8 +16,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use thiserror::Error;
 
+use crate::crypto::raw_keys::MlDsaKeyPair;
 use crate::nat_traversal::{BootstrapNode, NatTraversalConfig};
-use ed25519_dalek::{SigningKey as Ed25519SecretKey, VerifyingKey as Ed25519PublicKey};
 
 mod validation;
 
@@ -61,14 +61,14 @@ pub type ConfigResult<T> = Result<T, ConfigError>;
 ///
 /// ```
 /// use ant_quic::api::config::P2PConfig;
-/// use ant_quic::crypto::raw_public_keys::key_utils;
+/// use ant_quic::crypto::raw_keys;
 /// use ant_quic::nat_traversal::BootstrapNode;
 /// use std::net::SocketAddr;
 ///
 /// let bootstrap_addr: SocketAddr = "127.0.0.1:9000".parse().unwrap();
 /// let config = P2PConfig::builder()
 ///     .with_bootstrap_nodes(vec![BootstrapNode::new(bootstrap_addr)])
-///     .with_keypair(key_utils::generate_ed25519_keypair())
+///     .with_keypair(raw_keys::generate_ml_dsa_keypair())
 ///     .with_nat_traversal(true)
 ///     .build()
 ///     .unwrap();
@@ -79,7 +79,7 @@ pub struct P2PConfig {
     pub(crate) bootstrap_nodes: Vec<BootstrapNode>,
 
     /// Keypair for authentication
-    pub(crate) keypair: (Ed25519SecretKey, Ed25519PublicKey),
+    pub(crate) keypair: MlDsaKeyPair,
 
     /// Enable NAT traversal
     pub(crate) nat_traversal_enabled: bool,
@@ -120,7 +120,7 @@ impl P2PConfig {
     }
 
     /// Get the keypair
-    pub fn keypair(&self) -> &(Ed25519SecretKey, Ed25519PublicKey) {
+    pub fn keypair(&self) -> &MlDsaKeyPair {
         &self.keypair
     }
 
@@ -163,14 +163,14 @@ impl P2PConfig {
 ///
 /// ```
 /// use ant_quic::api::config::P2PConfigBuilder;
-/// use ant_quic::crypto::raw_public_keys::key_utils;
+/// use ant_quic::crypto::raw_keys;
 /// use ant_quic::nat_traversal::BootstrapNode;
 /// use std::net::SocketAddr;
 ///
 /// let bootstrap_addr: SocketAddr = "127.0.0.1:9000".parse().unwrap();
 /// let config = P2PConfigBuilder::new()
 ///     .with_bootstrap_nodes(vec![BootstrapNode::new(bootstrap_addr)])
-///     .with_keypair(key_utils::generate_ed25519_keypair())
+///     .with_keypair(raw_keys::generate_ml_dsa_keypair())
 ///     .with_nat_traversal(true)
 ///     .build()
 ///     .unwrap();
@@ -178,7 +178,7 @@ impl P2PConfig {
 #[derive(Clone, Debug)]
 pub struct P2PConfigBuilder {
     bootstrap_nodes: Vec<BootstrapNode>,
-    keypair: Option<(Ed25519SecretKey, Ed25519PublicKey)>,
+    keypair: Option<MlDsaKeyPair>,
     nat_traversal_enabled: bool,
     listen_address: Option<SocketAddr>,
     connection_timeout: Duration,
@@ -218,7 +218,7 @@ impl P2PConfigBuilder {
     }
 
     /// Set the keypair for authentication
-    pub fn with_keypair(&mut self, keypair: (Ed25519SecretKey, Ed25519PublicKey)) -> &mut Self {
+    pub fn with_keypair(&mut self, keypair: MlDsaKeyPair) -> &mut Self {
         self.keypair = Some(keypair);
         self
     }
@@ -343,13 +343,13 @@ impl Default for P2PConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::raw_public_keys::key_utils;
+    use crate::crypto::raw_keys;
     use crate::nat_traversal::BootstrapNode;
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn test_builder_with_valid_config() {
-        let keypair = key_utils::generate_ed25519_keypair();
+        let keypair = raw_keys::generate_ml_dsa_keypair().unwrap();
         let bootstrap_node = BootstrapNode::new("127.0.0.1:9000".parse().unwrap());
 
         let config = P2PConfigBuilder::new()
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_builder_missing_bootstrap_nodes() {
-        let keypair = key_utils::generate_ed25519_keypair();
+        let keypair = raw_keys::generate_ml_dsa_keypair().unwrap();
 
         let result = P2PConfigBuilder::new()
             .with_keypair(keypair)
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_builder_duplicate_bootstrap_nodes() {
-        let keypair = key_utils::generate_ed25519_keypair();
+        let keypair = raw_keys::generate_ml_dsa_keypair().unwrap();
         let addr = "127.0.0.1:9000".parse().unwrap();
         let bootstrap_node1 = BootstrapNode::new(addr);
         let bootstrap_node2 = BootstrapNode::new(addr);
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_builder_invalid_connection_timeout() {
-        let keypair = key_utils::generate_ed25519_keypair();
+        let keypair = raw_keys::generate_ml_dsa_keypair().unwrap();
         let bootstrap_node = BootstrapNode::new("127.0.0.1:9000".parse().unwrap());
 
         let result = P2PConfigBuilder::new()
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_builder_nat_traversal_disabled() {
-        let keypair = key_utils::generate_ed25519_keypair();
+        let keypair = raw_keys::generate_ml_dsa_keypair().unwrap();
 
         let config = P2PConfigBuilder::new()
             .with_keypair(keypair)
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_config_getters() {
-        let keypair = key_utils::generate_ed25519_keypair();
+        let keypair = raw_keys::generate_ml_dsa_keypair().unwrap();
         let bootstrap_node = BootstrapNode::new("127.0.0.1:9000".parse().unwrap());
         let listen_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8000);
         let timeout = Duration::from_secs(60);

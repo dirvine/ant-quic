@@ -21,7 +21,7 @@
 //!
 //! # Security
 //!
-//! All relay operations use Ed25519 cryptographic authentication with
+//! All relay operations use ML-DSA-65 cryptographic authentication with
 //! anti-replay protection. Rate limiting prevents abuse and ensures
 //! fair resource allocation among clients.
 

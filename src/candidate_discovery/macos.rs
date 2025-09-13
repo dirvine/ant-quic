@@ -406,10 +406,10 @@ unsafe fn cf_string_to_rust_string(cf_str: CFStringRef) -> Option<String> {
 }
 
 unsafe fn rust_string_to_cf_string(s: &str) -> CFStringRef {
-    unsafe {
-        let c_str = CString::new(s).unwrap();
-        CFStringCreateWithCString(kCFAllocatorDefault, c_str.as_ptr(), kCFStringEncodingUTF8)
-    }
+    // Sanitize to avoid interior NULs; fallback to empty string on error
+    let sanitized = s.replace('\0', "");
+    let c_str = CString::new(sanitized).unwrap_or_else(|_| CString::new("").unwrap());
+    unsafe { CFStringCreateWithCString(kCFAllocatorDefault, c_str.as_ptr(), kCFStringEncodingUTF8) }
 }
 
 impl MacOSInterfaceDiscovery {
@@ -447,7 +447,7 @@ impl MacOSInterfaceDiscovery {
         }
 
         // Create dynamic store
-        let store_name = CString::new("ant-quic-network-discovery").unwrap();
+        let store_name = CString::new("ant-quic-network-discovery").unwrap_or_else(|_| CString::new("").unwrap());
         let sc_store = unsafe {
             // SCDynamicStoreCreate equivalent
             self.create_dynamic_store(store_name.as_ptr())
@@ -473,7 +473,9 @@ impl MacOSInterfaceDiscovery {
         // Initialize dynamic store if not already done
         self.initialize_dynamic_store()?;
 
-        let sc_store = self.sc_store.as_ref().unwrap();
+        let Some(sc_store) = self.sc_store.as_ref() else {
+            return Err(MacOSNetworkError::DynamicStoreAccessFailed { reason: "Dynamic store not initialized".into() });
+        };
 
         unsafe {
             // Set up notification keys for network changes

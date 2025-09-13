@@ -6,24 +6,12 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== ML-KEM-768 Usage Example ===\n");
 
-    // Check if PQC features are enabled
-    #[cfg(not(feature = "pqc"))]
-    {
-        println!("Error: This example requires the 'pqc' feature to be enabled.");
-        println!("Run with: cargo run --example ml_kem_usage --features pqc");
-        Ok(())
-    }
-
-    #[cfg(feature = "pqc")]
-    {
-        run_ml_kem_demo()
-    }
+    // PQC is now always enabled, so we can directly run the demo
+    run_ml_kem_demo()
 }
 
-#[cfg(feature = "pqc")]
 use ant_quic::crypto::pqc::{MlKemOperations, ml_kem_impl::MlKem768Impl};
 
-#[cfg(feature = "pqc")]
 fn run_ml_kem_demo() -> Result<(), Box<dyn std::error::Error>> {
     println!("ML-KEM-768 Example\n");
 

@@ -339,17 +339,8 @@ impl EndpointTester {
 
 /// Create a test client configuration
 fn create_test_client_config(_server_name: &str) -> Result<ClientConfig, ValidationError> {
-    // Use the platform verifier if available
-    #[cfg(feature = "platform-verifier")]
+    // Fall back to accepting any certificate for testing
     {
-        ClientConfig::try_with_platform_verifier().map_err(|e| {
-            ValidationError::ValidationError(format!("Failed to create client config: {e}"))
-        })
-    }
-
-    #[cfg(not(feature = "platform-verifier"))]
-    {
-        // Fall back to accepting any certificate for testing
         use crate::crypto::rustls::QuicClientConfig;
         use std::sync::Arc;
 

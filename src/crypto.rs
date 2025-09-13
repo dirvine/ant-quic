@@ -25,19 +25,16 @@ use crate::{
     transport_parameters::TransportParameters,
 };
 
-/// Cryptography interface based on *ring*
-#[cfg(any(feature = "aws-lc-rs", feature = "ring"))]
+/// Cryptography interface based on aws-lc-rs
 pub(crate) mod ring_like;
-/// TLS interface based on rustls
-#[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
+
+/// TLS interface based on rustls (always available)
 pub mod rustls;
 
-/// Certificate management
-#[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
+/// Certificate management (always available)
 pub mod certificate_manager;
 
-/// RFC 7250 Raw Public Keys support
-#[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
+/// RFC 7250 Raw Public Keys support (always available)
 pub mod raw_public_keys;
 
 /// Ed25519 key pair implementation
@@ -45,6 +42,9 @@ pub mod raw_keys;
 
 /// Post-Quantum Cryptography support - always available
 pub mod pqc;
+
+/// Crypto utilities using aws-lc-rs (for PQC-only implementation)
+pub mod utilities;
 
 // NOTE: The following modules were removed because they were written as external
 // integrations with Quinn, but ant-quic IS a fork of Quinn, not something that

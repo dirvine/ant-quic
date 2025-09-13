@@ -2,9 +2,7 @@
 
 use ant_quic::{
     auth::AuthConfig,
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair,
-    },
+    crypto::raw_public_keys::key_utils::{derive_peer_id_from_public_key, generate_ml_dsa_keypair},
     nat_traversal_api::EndpointRole,
     quic_node::{QuicNodeConfig, QuicP2PNode},
 };
@@ -76,7 +74,8 @@ async fn test_peer_id_generation() {
     let mut peer_ids = Vec::new();
 
     for i in 0..10 {
-        let (_private_key, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         // Ensure this peer ID is unique

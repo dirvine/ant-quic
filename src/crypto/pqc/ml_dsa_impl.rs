@@ -13,7 +13,7 @@
 use crate::crypto::pqc::MlDsaOperations;
 use crate::crypto::pqc::types::*;
 
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use aws_lc_rs::{
     encoding::AsDer,
     signature::{KeyPair, UnparsedPublicKey},
@@ -23,13 +23,13 @@ use aws_lc_rs::{
     },
 };
 
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use std::collections::HashMap;
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 use std::sync::{Arc, Mutex};
 
 /// Cached key entry for ML-DSA
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 struct CachedDsaKey {
     key_pair: Arc<PqdsaKeyPair>,
     public_key_der: Vec<u8>,
@@ -37,13 +37,13 @@ struct CachedDsaKey {
 
 /// ML-DSA-65 implementation using aws-lc-rs
 pub struct MlDsa65Impl {
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     signing_alg: &'static PqdsaSigningAlgorithm,
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     verification_alg: &'static PqdsaVerificationAlgorithm,
     /// Key cache - maps public key bytes to full key pair
     /// This is needed because aws-lc-rs doesn't expose private key serialization
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     key_cache: Arc<Mutex<HashMap<Vec<u8>, CachedDsaKey>>>,
 }
 
@@ -51,17 +51,17 @@ impl MlDsa65Impl {
     /// Create a new ML-DSA-65 implementation
     pub fn new() -> Self {
         Self {
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             signing_alg: &ML_DSA_65_SIGNING,
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             verification_alg: &ML_DSA_65,
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             key_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Clear the key cache
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     pub fn clear_cache(&self) {
         if let Ok(mut cache) = self.key_cache.lock() {
             cache.clear();
@@ -72,17 +72,17 @@ impl MlDsa65Impl {
 impl Clone for MlDsa65Impl {
     fn clone(&self) -> Self {
         Self {
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             signing_alg: self.signing_alg,
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             verification_alg: self.verification_alg,
-            #[cfg(feature = "aws-lc-rs")]
+            #[cfg(feature = "rustls-aws-lc-rs")]
             key_cache: Arc::clone(&self.key_cache),
         }
     }
 }
 
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(feature = "rustls-aws-lc-rs")]
 impl MlDsaOperations for MlDsa65Impl {
     fn generate_keypair(&self) -> PqcResult<(MlDsaPublicKey, MlDsaSecretKey)> {
         // Generate a new key pair
@@ -219,7 +219,7 @@ impl MlDsaOperations for MlDsa65Impl {
 }
 
 // Fallback implementation when aws-lc-rs is not available
-#[cfg(not(feature = "aws-lc-rs"))]
+#[cfg(not(feature = "rustls-aws-lc-rs"))]
 impl MlDsaOperations for MlDsa65Impl {
     fn generate_keypair(&self) -> PqcResult<(MlDsaPublicKey, MlDsaSecretKey)> {
         // Without aws-lc-rs, we can't provide real ML-DSA
@@ -252,12 +252,12 @@ impl MlDsaOperations for MlDsa65Impl {
     }
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_ml_dsa_65_key_generation() {
         let ml_dsa = MlDsa65Impl::new();
         let result = ml_dsa.generate_keypair();
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_ml_dsa_65_sign_verify() {
         let ml_dsa = MlDsa65Impl::new();
 
@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_ml_dsa_65_verify_with_different_key() {
         let ml_dsa = MlDsa65Impl::new();
 
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "aws-lc-rs"))]
+    #[cfg(not(feature = "rustls-aws-lc-rs"))]
     fn test_ml_dsa_without_feature() {
         let ml_dsa = MlDsa65Impl::new();
 

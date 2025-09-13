@@ -29,9 +29,9 @@
 
 use crate::crypto::pqc::types::*;
 use crate::crypto::pqc::{MlKemOperations, ml_kem::MlKem768};
-use ring::aead::{self, AES_256_GCM, LessSafeKey, Nonce, UnboundKey};
-use ring::digest;
-use ring::rand::{SecureRandom, SystemRandom};
+use aws_lc_rs::aead::{self, AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+use aws_lc_rs::digest;
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use std::collections::HashMap;
 
 /// Wire format for encrypted messages
@@ -306,7 +306,7 @@ impl HybridPublicKeyEncryption {
 
         let mut ciphertext = plaintext.to_vec();
         aes_key
-            .seal_in_place_append_tag(nonce_obj, aead::Aad::from(associated_data), &mut ciphertext)
+            .seal_in_place_append_tag(nonce_obj, Aad::from(associated_data), &mut ciphertext)
             .map_err(|_| PqcError::EncapsulationFailed("AES encryption failed".to_string()))?;
 
         Ok(ciphertext)
@@ -330,7 +330,7 @@ impl HybridPublicKeyEncryption {
         // open_in_place will verify the tag and return the plaintext without it
         let mut in_out = ciphertext.to_vec();
         let plaintext = aes_key
-            .open_in_place(nonce_obj, aead::Aad::from(associated_data), &mut in_out)
+            .open_in_place(nonce_obj, Aad::from(associated_data), &mut in_out)
             .map_err(|_| PqcError::DecapsulationFailed("AES decryption failed".to_string()))?;
 
         Ok(plaintext.to_vec())
@@ -374,7 +374,7 @@ impl Default for HybridPublicKeyEncryption {
 unsafe impl Send for EncryptedMessage {}
 unsafe impl Sync for EncryptedMessage {}
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_encryption_decryption_roundtrip() {
         let pke = HybridPublicKeyEncryption::new();
 
@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_different_associated_data_fails() {
         let pke = HybridPublicKeyEncryption::new();
         let (public_key, secret_key) = pke.ml_kem.generate_keypair().unwrap();
@@ -502,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_empty_plaintext() {
         let pke = HybridPublicKeyEncryption::new();
         let (public_key, secret_key) = pke.ml_kem.generate_keypair().unwrap();
@@ -523,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "aws-lc-rs")]
+    #[cfg(feature = "rustls-aws-lc-rs")]
     fn test_large_plaintext() {
         let pke = HybridPublicKeyEncryption::new();
         let (public_key, secret_key) = pke.ml_kem.generate_keypair().unwrap();

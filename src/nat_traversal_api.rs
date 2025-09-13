@@ -1385,11 +1385,89 @@ impl NatTraversalEndpoint {
         // Create server config if this is a coordinator/bootstrap node
         let server_config = match config.role {
             EndpointRole::Bootstrap | EndpointRole::Server { .. } => {
-                // Production certificate management
+                #[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
+                {
+                    // Production certificate management
+                    let cert_config = CertificateConfig {
+                        common_name: format!("ant-quic-{}", config.role.name()),
+                        subject_alt_names: vec![
+                            "localhost".to_string(),
+                            "ant-quic-node".to_string(),
+                        ],
+                        self_signed: true, // Use self-signed for P2P networks
+                        ..CertificateConfig::default()
+                    };
+
+                    let cert_manager = CertificateManager::new(cert_config).map_err(|e| {
+                        NatTraversalError::ConfigError(format!(
+                            "Certificate manager creation failed: {e}"
+                        ))
+                    })?;
+
+                    let cert_bundle = cert_manager.generate_certificate().map_err(|e| {
+                        NatTraversalError::ConfigError(format!(
+                            "Certificate generation failed: {e}"
+                        ))
+                    })?;
+
+                    let rustls_config =
+                        cert_manager
+                            .create_server_config(&cert_bundle)
+                            .map_err(|e| {
+                                NatTraversalError::ConfigError(format!(
+                                    "Server config creation failed: {e}"
+                                ))
+                            })?;
+
+                    let server_crypto = QuicServerConfig::try_from(rustls_config.as_ref().clone())
+                        .map_err(|e| NatTraversalError::ConfigError(e.to_string()))?;
+
+                    let mut server_config = ServerConfig::with_crypto(Arc::new(server_crypto));
+
+                    // Configure transport parameters for NAT traversal
+                    let mut transport_config = TransportConfig::default();
+                    transport_config
+                        .keep_alive_interval(Some(config.timeouts.nat_traversal.retry_interval));
+                    transport_config.max_idle_timeout(Some(crate::VarInt::from_u32(30000).into()));
+
+                    // Enable NAT traversal in transport parameters
+                    // Per draft-seemann-quic-nat-traversal-02:
+                    // - Client sends empty parameter
+                    // - Server sends concurrency limit
+                    let nat_config = match config.role {
+                        EndpointRole::Client => {
+                            crate::transport_parameters::NatTraversalConfig::ClientSupport
+                        }
+                        EndpointRole::Bootstrap | EndpointRole::Server { .. } => {
+                            crate::transport_parameters::NatTraversalConfig::ServerSupport {
+                                concurrency_limit: VarInt::from_u32(
+                                    config.max_concurrent_attempts as u32,
+                                ),
+                            }
+                        }
+                    };
+                    transport_config.nat_traversal_config(Some(nat_config));
+
+                    server_config.transport_config(Arc::new(transport_config));
+
+                    Some(server_config)
+                }
+                #[cfg(not(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring")))]
+                {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        // Create client config for outgoing connections
+        let client_config = {
+            #[cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
+            {
                 let cert_config = CertificateConfig {
                     common_name: format!("ant-quic-{}", config.role.name()),
                     subject_alt_names: vec!["localhost".to_string(), "ant-quic-node".to_string()],
-                    self_signed: true, // Use self-signed for P2P networks
+                    self_signed: true,
                     ..CertificateConfig::default()
                 };
 
@@ -1399,28 +1477,22 @@ impl NatTraversalEndpoint {
                     ))
                 })?;
 
-                let cert_bundle = cert_manager.generate_certificate().map_err(|e| {
+                let _cert_bundle = cert_manager.generate_certificate().map_err(|e| {
                     NatTraversalError::ConfigError(format!("Certificate generation failed: {e}"))
                 })?;
 
-                let rustls_config =
-                    cert_manager
-                        .create_server_config(&cert_bundle)
-                        .map_err(|e| {
-                            NatTraversalError::ConfigError(format!(
-                                "Server config creation failed: {e}"
-                            ))
-                        })?;
+                let rustls_config = cert_manager.create_client_config().map_err(|e| {
+                    NatTraversalError::ConfigError(format!("Client config creation failed: {e}"))
+                })?;
 
-                let server_crypto = QuicServerConfig::try_from(rustls_config.as_ref().clone())
+                let client_crypto = QuicClientConfig::try_from(rustls_config.as_ref().clone())
                     .map_err(|e| NatTraversalError::ConfigError(e.to_string()))?;
 
-                let mut server_config = ServerConfig::with_crypto(Arc::new(server_crypto));
+                let mut client_config = ClientConfig::new(Arc::new(client_crypto));
 
                 // Configure transport parameters for NAT traversal
                 let mut transport_config = TransportConfig::default();
-                transport_config
-                    .keep_alive_interval(Some(config.timeouts.nat_traversal.retry_interval));
+                transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
                 transport_config.max_idle_timeout(Some(crate::VarInt::from_u32(30000).into()));
 
                 // Enable NAT traversal in transport parameters
@@ -1441,63 +1513,38 @@ impl NatTraversalEndpoint {
                 };
                 transport_config.nat_traversal_config(Some(nat_config));
 
-                server_config.transport_config(Arc::new(transport_config));
+                client_config.transport_config(Arc::new(transport_config));
 
-                Some(server_config)
+                client_config
             }
-            _ => None,
-        };
+            #[cfg(not(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring")))]
+            {
+                // Create a default client config without TLS when rustls features are not enabled
+                let mut client_config = ClientConfig::default();
+                let mut transport_config = TransportConfig::default();
+                transport_config.max_concurrent_bidi_streams(VarInt::from_u32(100));
+                transport_config.max_concurrent_uni_streams(VarInt::from_u32(100));
+                transport_config.max_idle_timeout(Some(crate::config::IdleTimeout::from(
+                    VarInt::from_u32(30_000),
+                )));
 
-        // Create client config for outgoing connections
-        let client_config = {
-            let cert_config = CertificateConfig {
-                common_name: format!("ant-quic-{}", config.role.name()),
-                subject_alt_names: vec!["localhost".to_string(), "ant-quic-node".to_string()],
-                self_signed: true,
-                ..CertificateConfig::default()
-            };
-
-            let cert_manager = CertificateManager::new(cert_config).map_err(|e| {
-                NatTraversalError::ConfigError(format!("Certificate manager creation failed: {e}"))
-            })?;
-
-            let _cert_bundle = cert_manager.generate_certificate().map_err(|e| {
-                NatTraversalError::ConfigError(format!("Certificate generation failed: {e}"))
-            })?;
-
-            let rustls_config = cert_manager.create_client_config().map_err(|e| {
-                NatTraversalError::ConfigError(format!("Client config creation failed: {e}"))
-            })?;
-
-            let client_crypto = QuicClientConfig::try_from(rustls_config.as_ref().clone())
-                .map_err(|e| NatTraversalError::ConfigError(e.to_string()))?;
-
-            let mut client_config = ClientConfig::new(Arc::new(client_crypto));
-
-            // Configure transport parameters for NAT traversal
-            let mut transport_config = TransportConfig::default();
-            transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
-            transport_config.max_idle_timeout(Some(crate::VarInt::from_u32(30000).into()));
-
-            // Enable NAT traversal in transport parameters
-            // Per draft-seemann-quic-nat-traversal-02:
-            // - Client sends empty parameter
-            // - Server sends concurrency limit
-            let nat_config = match config.role {
-                EndpointRole::Client => {
-                    crate::transport_parameters::NatTraversalConfig::ClientSupport
-                }
-                EndpointRole::Bootstrap | EndpointRole::Server { .. } => {
-                    crate::transport_parameters::NatTraversalConfig::ServerSupport {
-                        concurrency_limit: VarInt::from_u32(config.max_concurrent_attempts as u32),
+                let nat_config = match config.role {
+                    EndpointRole::Client => {
+                        crate::transport_parameters::NatTraversalConfig::ClientSupport
                     }
-                }
-            };
-            transport_config.nat_traversal_config(Some(nat_config));
+                    EndpointRole::Bootstrap | EndpointRole::Server { .. } => {
+                        crate::transport_parameters::NatTraversalConfig::ServerSupport {
+                            concurrency_limit: VarInt::from_u32(
+                                config.max_concurrent_attempts as u32,
+                            ),
+                        }
+                    }
+                };
+                transport_config.nat_traversal_config(Some(nat_config));
 
-            client_config.transport_config(Arc::new(transport_config));
-
-            client_config
+                client_config.transport_config(Arc::new(transport_config));
+                client_config
+            }
         };
 
         // Create UDP socket

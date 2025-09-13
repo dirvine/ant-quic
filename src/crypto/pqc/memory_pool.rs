@@ -218,21 +218,17 @@ pub struct PoolGuard<T: BufferCleanup> {
 
 impl<T: BufferCleanup> PoolGuard<T> {
     /// Get a reference to the pooled object
+    #[allow(clippy::expect_used)]
     pub fn as_ref(&self) -> &T {
-        // SAFETY: PoolGuard is constructed with Some(object) and only consumed on drop
-        // The object is guaranteed to exist until drop
-        self.object
-            .as_ref()
-            .expect("PoolGuard object must exist until drop")
+        // Invariant: `object` remains `Some` until Drop, so access is infallible.
+        self.object.as_ref().expect("PoolGuard object must exist until drop")
     }
 
     /// Get a mutable reference to the pooled object
+    #[allow(clippy::expect_used)]
     pub fn as_mut(&mut self) -> &mut T {
-        // SAFETY: PoolGuard is constructed with Some(object) and only consumed on drop
-        // The object is guaranteed to exist until drop
-        self.object
-            .as_mut()
-            .expect("PoolGuard object must exist until drop")
+        // Invariant: `object` remains `Some` until Drop, so access is infallible.
+        self.object.as_mut().expect("PoolGuard object must exist until drop")
     }
 }
 
@@ -340,7 +336,7 @@ impl PqcMemoryPool {
     }
 
     /// Get available count for ML-KEM public keys (for testing)
-    #[cfg(all(test, feature = "pqc"))]
+    #[cfg(test)]
     pub fn available_count(&self) -> usize {
         self.ml_kem_public_keys.available_count()
     }
@@ -378,7 +374,7 @@ impl fmt::Debug for PqcMemoryPool {
     }
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

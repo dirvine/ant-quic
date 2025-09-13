@@ -618,11 +618,7 @@ impl LinuxInterfaceDiscovery {
 
         // Get interface flags
         let flags_result = unsafe {
-            libc::ioctl(
-                socket_fd,
-                libc::SIOCGIFFLAGS.try_into().unwrap(),
-                &mut ifreq,
-            )
+            libc::ioctl(socket_fd, libc::SIOCGIFFLAGS as _, &mut ifreq)
         };
         if flags_result < 0 {
             unsafe {
@@ -645,8 +641,7 @@ impl LinuxInterfaceDiscovery {
         };
 
         // Get MTU
-        let mtu_result =
-            unsafe { libc::ioctl(socket_fd, libc::SIOCGIFMTU.try_into().unwrap(), &mut ifreq) };
+        let mtu_result = unsafe { libc::ioctl(socket_fd, libc::SIOCGIFMTU as _, &mut ifreq) };
         let mtu = if mtu_result >= 0 {
             unsafe { ifreq.ifr_ifru.ifru_mtu as u32 }
         } else {
@@ -753,11 +748,7 @@ impl LinuxInterfaceDiscovery {
         }
 
         let result = unsafe {
-            libc::ioctl(
-                socket_fd,
-                libc::SIOCGIFHWADDR.try_into().unwrap(),
-                &mut ifreq,
-            )
+            libc::ioctl(socket_fd, libc::SIOCGIFHWADDR as _, &mut ifreq)
         };
         unsafe {
             libc::close(socket_fd);
@@ -807,8 +798,7 @@ impl LinuxInterfaceDiscovery {
             );
         }
 
-        let result =
-            unsafe { libc::ioctl(socket_fd, libc::SIOCGIFADDR.try_into().unwrap(), &mut ifreq) };
+        let result = unsafe { libc::ioctl(socket_fd, libc::SIOCGIFADDR as _, &mut ifreq) };
         if result >= 0 {
             let sockaddr_in = unsafe {
                 &*(&ifreq.ifr_ifru.ifru_addr as *const libc::sockaddr as *const libc::sockaddr_in)
@@ -820,11 +810,7 @@ impl LinuxInterfaceDiscovery {
 
                 // Get netmask
                 let netmask_result = unsafe {
-                    libc::ioctl(
-                        socket_fd,
-                        libc::SIOCGIFNETMASK.try_into().unwrap(),
-                        &mut ifreq,
-                    )
+                    libc::ioctl(socket_fd, libc::SIOCGIFNETMASK as _, &mut ifreq)
                 };
                 let prefix_len = if netmask_result >= 0 {
                     let netmask_sockaddr_in = unsafe {

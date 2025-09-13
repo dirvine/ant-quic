@@ -1282,10 +1282,7 @@ impl Connection {
             "PATH_CHALLENGE queued without 1-RTT keys"
         );
 
-        #[cfg(feature = "pqc")]
         buf.reserve(self.pqc_state.min_initial_size() as usize);
-        #[cfg(not(feature = "pqc"))]
-        buf.reserve(MIN_INITIAL_SIZE as usize);
         let buf_capacity = buf.capacity();
 
         let mut builder = PacketBuilder::new(
@@ -1307,10 +1304,7 @@ impl Connection {
         buf.write(challenge);
         self.stats.frame_tx.path_challenge += 1;
 
-        #[cfg(feature = "pqc")]
         let min_size = self.pqc_state.min_initial_size();
-        #[cfg(not(feature = "pqc"))]
-        let min_size = MIN_INITIAL_SIZE;
         builder.pad_to(min_size);
         builder.finish_and_track(now, self, None, buf);
 
@@ -1378,10 +1372,7 @@ impl Connection {
             "PATH_CHALLENGE queued without 1-RTT keys"
         );
 
-        #[cfg(feature = "pqc")]
         buf.reserve(self.pqc_state.min_initial_size() as usize);
-        #[cfg(not(feature = "pqc"))]
-        buf.reserve(MIN_INITIAL_SIZE as usize);
         let buf_capacity = buf.capacity();
 
         // Use current connection ID for NAT traversal PATH_CHALLENGE
@@ -1405,10 +1396,7 @@ impl Connection {
         self.stats.frame_tx.path_challenge += 1;
 
         // PATH_CHALLENGE frames must be padded to at least 1200 bytes
-        #[cfg(feature = "pqc")]
         let min_size = self.pqc_state.min_initial_size();
-        #[cfg(not(feature = "pqc"))]
-        let min_size = MIN_INITIAL_SIZE;
         builder.pad_to(min_size);
 
         builder.finish_and_track(now, self, None, buf);
@@ -1442,10 +1430,7 @@ impl Connection {
             SpaceId::Data,
             "PATH_CHALLENGE queued without 1-RTT keys"
         );
-        #[cfg(feature = "pqc")]
         buf.reserve(self.pqc_state.min_initial_size() as usize);
-        #[cfg(not(feature = "pqc"))]
-        buf.reserve(MIN_INITIAL_SIZE as usize);
 
         let buf_capacity = buf.capacity();
 
@@ -1473,10 +1458,7 @@ impl Connection {
         // to at least the smallest allowed maximum datagram size of 1200 bytes,
         // unless the anti-amplification limit for the path does not permit
         // sending a datagram of this size
-        #[cfg(feature = "pqc")]
         let min_size = self.pqc_state.min_initial_size();
-        #[cfg(not(feature = "pqc"))]
-        let min_size = MIN_INITIAL_SIZE;
         builder.pad_to(min_size);
 
         builder.finish(self, buf);
@@ -2524,7 +2506,6 @@ impl Connection {
         }
 
         // Detect PQC usage from CRYPTO frame data before processing
-        #[cfg(feature = "pqc")]
         {
             self.pqc_state.detect_pqc_from_crypto(&crypto.data, space);
 
@@ -2591,14 +2572,10 @@ impl Connection {
             trace!("wrote {} {:?} CRYPTO bytes", outgoing.len(), space);
 
             // Use PQC-aware fragmentation for large CRYPTO data
-            #[cfg(feature = "pqc")]
             let use_pqc_fragmentation = self.pqc_state.using_pqc && outgoing.len() > 1200;
-            #[cfg(not(feature = "pqc"))]
-            let use_pqc_fragmentation = false;
 
             if use_pqc_fragmentation {
                 // Fragment large CRYPTO data for PQC handshakes
-                #[cfg(feature = "pqc")]
                 {
                     let frames = self.pqc_state.packet_handler.fragment_crypto_data(
                         &outgoing,
@@ -3874,12 +3851,9 @@ impl Connection {
             // Use PQC-aware sizing for CRYPTO frames
             let available_space = max_size - buf.len();
             let remaining_data = frame.data.len();
-            #[cfg(feature = "pqc")]
             let optimal_size = self
                 .pqc_state
                 .calculate_crypto_frame_size(available_space, remaining_data);
-            #[cfg(not(feature = "pqc"))]
-            let optimal_size = available_space.min(remaining_data);
 
             let len = frame
                 .data
@@ -4210,7 +4184,6 @@ impl Connection {
         self.negotiate_address_discovery(&params);
 
         // Update PQC state based on peer parameters
-        #[cfg(feature = "pqc")]
         {
             self.pqc_state.update_from_peer_params(&params);
 
@@ -6151,7 +6124,6 @@ impl PqcState {
     }
 }
 
-#[cfg(feature = "pqc")]
 impl Default for PqcState {
     fn default() -> Self {
         Self::new()

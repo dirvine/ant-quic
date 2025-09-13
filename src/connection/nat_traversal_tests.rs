@@ -536,7 +536,7 @@ mod tests {
             transport: Arc::new(config),
             crypto: Arc::new(QuicServerConfig::with_single_cert(
                 vec![], // Empty cert chain for testing
-                Arc::new(ed25519_dalek::SigningKey::from_bytes(&[42; 32])),
+                Arc::new(crate::crypto::raw_keys::generate_ml_dsa_keypair().unwrap()),
             ).unwrap()),
         };
         

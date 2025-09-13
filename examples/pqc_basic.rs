@@ -3,20 +3,17 @@
 //! This example demonstrates the simplest way to enable PQC in ant-quic
 //! using the QuicP2PNode high-level API.
 
-#[cfg(feature = "pqc")]
 use ant_quic::{
     auth::AuthConfig,
-    crypto::pqc::{PqcConfig, PqcMode},
+    crypto::pqc::PqcConfig,
     crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair,
+        derive_peer_id_from_public_key, generate_ml_dsa_keypair,
     },
     nat_traversal_api::EndpointRole,
     quic_node::{QuicNodeConfig, QuicP2PNode},
 };
 
-#[cfg(feature = "pqc")]
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-#[cfg(feature = "pqc")]
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -29,17 +26,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .init();
 
-    // Check if PQC features are enabled
-    #[cfg(not(feature = "pqc"))]
-    {
-        println!("Error: This example requires the 'pqc' feature to be enabled.");
-        println!("Run with: cargo run --example pqc_basic --features pqc -- <server|client>");
-        std::process::exit(1);
-    }
-
-    #[cfg(feature = "pqc")]
-    {
-        // Parse command line arguments
+    // PQC is now always enabled
+    
+    // Parse command line arguments
         let args: Vec<String> = std::env::args().collect();
         if args.len() < 2 {
             println!("Usage: {} <server|client> [server_addr]", args[0]);
@@ -72,25 +61,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Ok(())
             }
         }
-    }
 }
 
-#[cfg(feature = "pqc")]
 async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("🚀 Starting PQC-enabled QUIC server...");
 
-    // Generate identity
-    let (_private_key, public_key) = generate_ed25519_keypair();
+    // Generate identity with ML-DSA
+    let keypair = generate_ml_dsa_keypair();
+    let public_key = keypair.public_key();
     let peer_id = derive_peer_id_from_public_key(&public_key);
     println!("📋 Server PeerID: {peer_id:?}");
 
-    // Create PQC configuration (configured in the auth layer)
-    #[cfg(feature = "pqc")]
-    let pqc_config = PqcConfig::builder().mode(PqcMode::Hybrid).build().unwrap();
-    #[cfg(feature = "pqc")]
-    println!("🔐 PQC Mode: {:?}", pqc_config.mode);
-    #[cfg(not(feature = "pqc"))]
-    println!("🔐 PQC disabled - using classical cryptography only");
+    // Create PQC configuration (always enabled)
+    let _pqc_config = PqcConfig::default();
+    println!("🔐 PQC Mode: Full post-quantum (ML-DSA-65 + ML-KEM-768)");
 
     // Create server configuration
     let config = QuicNodeConfig {
@@ -131,24 +115,20 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 }
 
-#[cfg(feature = "pqc")]
 async fn run_client(
     server_addr: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("🚀 Starting PQC-enabled QUIC client...");
 
-    // Generate identity
-    let (_private_key, public_key) = generate_ed25519_keypair();
+    // Generate identity with ML-DSA
+    let keypair = generate_ml_dsa_keypair();
+    let public_key = keypair.public_key();
     let peer_id = derive_peer_id_from_public_key(&public_key);
     println!("📋 Client PeerID: {peer_id:?}");
 
-    // Create PQC configuration
-    #[cfg(feature = "pqc")]
-    let pqc_config = PqcConfig::builder().mode(PqcMode::Hybrid).build().unwrap();
-    #[cfg(feature = "pqc")]
-    println!("🔐 PQC Mode: {:?}", pqc_config.mode);
-    #[cfg(not(feature = "pqc"))]
-    println!("🔐 PQC disabled - using classical cryptography only");
+    // Create PQC configuration (always enabled)
+    let _pqc_config = PqcConfig::default();
+    println!("🔐 PQC Mode: Full post-quantum (ML-DSA-65 + ML-KEM-768)");
 
     // Create client configuration
     let config = QuicNodeConfig {

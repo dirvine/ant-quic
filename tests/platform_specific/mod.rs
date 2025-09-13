@@ -149,7 +149,6 @@ mod platform_macos {
     }
 
     #[test]
-    #[cfg(feature = "platform-verifier")]
     fn test_macos_keychain_available() {
         use std::process::Command;
 
@@ -268,21 +267,7 @@ mod network_utils {
     }
 }
 
-// Platform-specific crypto tests
-#[cfg(all(test, feature = "rustls-ring"))]
-mod crypto_platform_tests {
-    #[test]
-    fn test_ring_crypto_available() {
-        use ring::rand::{SecureRandom, SystemRandom};
-
-        let rng = SystemRandom::new();
-        let mut buf = [0u8; 32];
-        rng.fill(&mut buf).expect("Failed to generate random bytes");
-
-        // Verify randomness (very basic check)
-        assert!(!buf.iter().all(|&b| b == 0));
-    }
-}
+// Platform-specific crypto tests - ring support removed, using aws-lc-rs only
 
 #[cfg(all(test, feature = "rustls-aws-lc-rs"))]
 mod crypto_aws_lc_tests {

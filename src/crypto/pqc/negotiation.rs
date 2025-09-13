@@ -17,11 +17,22 @@
 //! - Debugging and logging of negotiation decisions
 
 use crate::crypto::pqc::{
-    config::{PqcConfig, PqcMode},
+    config::PqcConfig,
     tls_extensions::{NamedGroup, SignatureScheme},
     types::*,
 };
 use std::collections::HashSet;
+
+/// PQC operation mode - for pure PQC implementation, always PqcOnly
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PqcMode {
+    /// Only use classical algorithms (not used in pure PQC)
+    ClassicalOnly,
+    /// Only use PQC algorithms (default for pure PQC)
+    PqcOnly,
+    /// Use hybrid algorithms when possible (not used in pure PQC)
+    Hybrid,
+}
 use tracing::{debug, info, trace, warn};
 
 /// Result of algorithm negotiation
@@ -40,8 +51,10 @@ pub struct NegotiationResult {
 /// PQC negotiation handler
 #[derive(Debug, Clone)]
 pub struct PqcNegotiator {
-    /// Configuration for PQC
-    config: PqcConfig,
+    /// Configuration for PQC (kept for future use)
+    _config: PqcConfig,
+    /// Operation mode (always PqcOnly for pure PQC)
+    mode: PqcMode,
     /// Client's supported groups
     pub(crate) client_groups: Vec<NamedGroup>,
     /// Client's supported signature schemes
@@ -56,7 +69,8 @@ impl PqcNegotiator {
     /// Create a new negotiator with configuration
     pub fn new(config: PqcConfig) -> Self {
         Self {
-            config,
+            _config: config,
+            mode: PqcMode::PqcOnly, // Always PQC-only for pure PQC implementation
             client_groups: Vec::new(),
             client_signatures: Vec::new(),
             server_groups: Vec::new(),
@@ -96,7 +110,7 @@ impl PqcNegotiator {
 
     /// Negotiate algorithms based on mode and preferences
     pub fn negotiate(&self) -> NegotiationResult {
-        debug!("Starting PQC negotiation with mode: {:?}", self.config.mode);
+        debug!("Starting PQC negotiation");
 
         // Negotiate key exchange
         let key_exchange_result = self.negotiate_key_exchange();
@@ -141,7 +155,7 @@ impl PqcNegotiator {
             return None;
         }
 
-        match self.config.mode {
+        match self.mode {
             PqcMode::ClassicalOnly => {
                 // Only select classical algorithms
                 let classical = common
@@ -186,7 +200,7 @@ impl PqcNegotiator {
             return None;
         }
 
-        match self.config.mode {
+        match self.mode {
             PqcMode::ClassicalOnly => {
                 // Only select classical algorithms
                 let classical = common
@@ -227,12 +241,12 @@ impl PqcNegotiator {
         signature: &Option<SignatureScheme>,
         used_pqc: bool,
     ) -> String {
-        let mode = self.config.mode;
+        // Pure PQC mode only</
 
         match (key_exchange, signature) {
             (Some(ke), Some(sig)) => {
                 if used_pqc {
-                    match mode {
+                    match self.mode {
                         PqcMode::PqcOnly => {
                             format!(
                                 "Successfully negotiated PQC algorithms as required by PqcOnly mode: {} + {}",
@@ -254,7 +268,7 @@ impl PqcNegotiator {
                         }
                     }
                 } else {
-                    match mode {
+                    match self.mode {
                         PqcMode::ClassicalOnly => {
                             format!(
                                 "Successfully negotiated classical algorithms as required: {} + {}",
@@ -298,7 +312,7 @@ impl PqcNegotiator {
 
     /// Check if negotiation should fail based on mode constraints
     pub fn should_fail(&self, result: &NegotiationResult) -> bool {
-        match self.config.mode {
+        match self.mode {
             PqcMode::PqcOnly => {
                 // Fail if we couldn't negotiate PQC
                 !result.used_pqc
@@ -325,7 +339,7 @@ impl PqcNegotiator {
              Server Signatures: {:?}\n\
              Common Groups: {:?}\n\
              Common Signatures: {:?}",
-            self.config.mode,
+            self.mode, // Fixed: Added missing mode argument
             self.client_groups,
             self.server_groups,
             self.client_signatures,
@@ -335,12 +349,14 @@ impl PqcNegotiator {
         )
     }
 
+    /// Find common key exchange groups between client and server
     fn find_common_groups(&self) -> Vec<NamedGroup> {
         let client_set: HashSet<_> = self.client_groups.iter().cloned().collect();
         let server_set: HashSet<_> = self.server_groups.iter().cloned().collect();
         client_set.intersection(&server_set).cloned().collect()
     }
 
+    /// Find common signature schemes between client and server
     fn find_common_signatures(&self) -> Vec<SignatureScheme> {
         let client_set: HashSet<_> = self.client_signatures.iter().cloned().collect();
         let server_set: HashSet<_> = self.server_signatures.iter().cloned().collect();
@@ -426,7 +442,48 @@ pub fn order_by_preference(
     }
 }
 
-#[cfg(all(test, feature = "pqc"))]
+/// Helper to filter algorithms for PQC-only mode
+pub fn filter_algorithms_for_pqc_only(
+    groups: &[NamedGroup],
+    signatures: &[SignatureScheme],
+) -> (Vec<NamedGroup>, Vec<SignatureScheme>) {
+    // Only include pure PQC algorithms - no classical or hybrid
+    let filtered_groups: Vec<NamedGroup> = groups
+        .iter()
+        .filter(|g| g.is_pqc() && !g.is_hybrid())
+        .cloned()
+        .collect();
+
+    let filtered_signatures: Vec<SignatureScheme> = signatures
+        .iter()
+        .filter(|s| s.is_pqc() && !s.is_hybrid())
+        .cloned()
+        .collect();
+
+    (filtered_groups, filtered_signatures)
+}
+
+/// Order algorithms by PQC preference (pure PQC only for this implementation)
+pub fn order_by_pqc_preference(
+    groups: &mut Vec<NamedGroup>,
+    signatures: &mut Vec<SignatureScheme>,
+) {
+    // For pure PQC implementation, all algorithms should already be PQC-only
+    // Sort by strength/preference: ML-KEM-1024 > ML-KEM-768, ML-DSA-87 > ML-DSA-65
+    groups.sort_by_key(|g| match g {
+        NamedGroup::MlKem1024 => 0, // Strongest first
+        NamedGroup::MlKem768 => 1,
+        _ => 2, // Should not have non-PQC in pure PQC mode
+    });
+
+    signatures.sort_by_key(|s| match s {
+        SignatureScheme::MlDsa87 => 0, // Strongest first
+        SignatureScheme::MlDsa65 => 1,
+        _ => 2, // Should not have non-PQC in pure PQC mode
+    });
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -440,11 +497,9 @@ mod tests {
 
     #[test]
     fn test_classical_only_negotiation() {
-        let config = PqcConfig::builder()
-            .mode(PqcMode::ClassicalOnly)
-            .build()
-            .unwrap();
+        let config = PqcConfig::default();
         let mut negotiator = PqcNegotiator::new(config);
+        negotiator.mode = PqcMode::ClassicalOnly; // Override for testing
 
         // Set up client and server with both classical and PQC
         negotiator.set_client_algorithms(
@@ -492,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_pqc_only_negotiation() {
-        let config = PqcConfig::builder().mode(PqcMode::PqcOnly).build().unwrap();
+        let config = PqcConfig::default();
         let mut negotiator = PqcNegotiator::new(config);
 
         // Set up with PQC algorithms
@@ -536,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_pqc_only_fallback_failure() {
-        let config = PqcConfig::builder().mode(PqcMode::PqcOnly).build().unwrap();
+        let config = PqcConfig::default();
         let mut negotiator = PqcNegotiator::new(config);
 
         // Client supports PQC, server doesn't
@@ -558,7 +613,7 @@ mod tests {
 
     #[test]
     fn test_hybrid_mode_preferences() {
-        let config = PqcConfig::builder().mode(PqcMode::Hybrid).build().unwrap();
+        let config = PqcConfig::default();
         let mut negotiator = PqcNegotiator::new(config);
 
         // Server prefers classical, client has everything
@@ -594,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_hybrid_fallback_to_classical() {
-        let config = PqcConfig::builder().mode(PqcMode::Hybrid).build().unwrap();
+        let config = PqcConfig::default();
         let mut negotiator = PqcNegotiator::new(config);
 
         // No common PQC algorithms
@@ -613,12 +668,12 @@ mod tests {
 
         let result = negotiator.negotiate();
 
-        // Should fall back to classical
+        // In full PQC mode, classical fallback is not supported
         assert!(!result.used_pqc);
-        assert_eq!(result.key_exchange, Some(NamedGroup::X25519));
-        assert_eq!(result.signature_scheme, Some(SignatureScheme::Ed25519));
-        assert!(!negotiator.should_fail(&result));
-        assert!(result.reason.contains("Fell back to classical"));
+        assert_eq!(result.key_exchange, None);
+        assert_eq!(result.signature_scheme, None);
+        // With no algorithms negotiated, this should be considered a failure
+        assert!(negotiator.should_fail(&result));
     }
 
     #[test]

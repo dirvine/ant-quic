@@ -1,22 +1,22 @@
 //! Comprehensive unit tests for the relay protocol implementation.
 
+use ant_quic::crypto::raw_keys::MlDsaKeyPair;
 use ant_quic::relay::session_manager::SessionEvent;
 use ant_quic::relay::{
     RelayAuthenticator, RelayConnection, RelayConnectionConfig, RelayError, RelayResult,
     RelayStatisticsCollector, SessionConfig, SessionManager,
 };
-use ed25519_dalek::SigningKey;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_session_manager_lifecycle() -> RelayResult<()> {
-    let (session_manager, mut event_receiver) = SessionManager::new(SessionConfig::default());
+    let (session_manager, mut event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
 
     // Add a trusted key for testing
-    let keypair = SigningKey::generate(&mut rand::thread_rng());
+    let keypair = MlDsaKeyPair::generate().unwrap();
     let client_addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
-    session_manager.add_trusted_key(client_addr, keypair.verifying_key());
+    session_manager.add_trusted_key(client_addr, keypair.public_key());
 
     // Create a valid auth token using the same key pair
     let authenticator = RelayAuthenticator::with_key(keypair.clone());
@@ -48,10 +48,10 @@ async fn test_session_manager_lifecycle() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_session_manager_authentication() -> RelayResult<()> {
-    let (session_manager, _event_receiver) = SessionManager::new(SessionConfig::default());
+    let (session_manager, _event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
 
     let client_addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
-    let keypair = SigningKey::generate(&mut rand::thread_rng());
+    let keypair = MlDsaKeyPair::generate().unwrap();
 
     // Test with no trusted key - should fail
     let authenticator = RelayAuthenticator::with_key(keypair.clone());
@@ -66,7 +66,7 @@ async fn test_session_manager_authentication() -> RelayResult<()> {
     assert!(result.is_err());
 
     // Add trusted key and try again - should succeed
-    session_manager.add_trusted_key(client_addr, keypair.verifying_key());
+    session_manager.add_trusted_key(client_addr, keypair.public_key());
 
     // Create a new token after adding the trusted key
     let auth_token2 = authenticator.create_token(1048576, 300)?;
@@ -89,16 +89,16 @@ async fn test_session_manager_resource_limits() -> RelayResult<()> {
         ..Default::default()
     };
 
-    let (session_manager, _event_receiver) = SessionManager::new(config);
+    let (session_manager, _event_receiver) = SessionManager::try_new(config).unwrap();
 
-    let keypair = SigningKey::generate(&mut rand::thread_rng());
-    let verifying_key = keypair.verifying_key();
+    let keypair = MlDsaKeyPair::generate().unwrap();
+    let public_key = keypair.public_key();
     let authenticator = RelayAuthenticator::with_key(keypair);
 
     // Add trusted keys for multiple clients
     for i in 0..3 {
         let addr: SocketAddr = format!("127.0.0.1:{}", 12345 + i).parse().unwrap();
-        session_manager.add_trusted_key(addr, verifying_key);
+        session_manager.add_trusted_key(addr, public_key.clone());
     }
 
     // Create sessions up to the limit
@@ -167,18 +167,18 @@ async fn test_relay_connection_bandwidth_limits() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_auth_token_creation_and_verification() -> RelayResult<()> {
-    let authenticator = RelayAuthenticator::new();
+    let authenticator = RelayAuthenticator::try_new().unwrap();
 
     // Create a token
     let token = authenticator.create_token(1048576, 300)?;
 
     // Verify token with correct key
-    let result = token.verify(authenticator.verifying_key());
+    let result = token.verify(&authenticator.public_key());
     assert!(result.is_ok());
 
     // Verify token with wrong key
-    let other_authenticator = RelayAuthenticator::new();
-    let result = token.verify(other_authenticator.verifying_key());
+    let other_authenticator = RelayAuthenticator::try_new().unwrap();
+    let result = token.verify(&other_authenticator.public_key());
     assert!(result.is_err());
 
     Ok(())
@@ -186,7 +186,7 @@ async fn test_auth_token_creation_and_verification() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_auth_token_expiration() -> RelayResult<()> {
-    let authenticator = RelayAuthenticator::new();
+    let authenticator = RelayAuthenticator::try_new().unwrap();
     let token = authenticator.create_token(1048576, 300)?;
 
     // Token should not be expired immediately (with sufficient max age)
@@ -265,17 +265,17 @@ async fn test_relay_statistics_health_check() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_session_manager_key_management() {
-    let (session_manager, _event_receiver) = SessionManager::new(SessionConfig::default());
+    let (session_manager, _event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
 
     let addr1: SocketAddr = "127.0.0.1:12345".parse().unwrap();
     let addr2: SocketAddr = "127.0.0.1:12346".parse().unwrap();
 
-    let keypair1 = SigningKey::generate(&mut rand::thread_rng());
-    let keypair2 = SigningKey::generate(&mut rand::thread_rng());
+    let keypair1 = MlDsaKeyPair::generate().unwrap();
+    let keypair2 = MlDsaKeyPair::generate().unwrap();
 
     // Add trusted keys
-    session_manager.add_trusted_key(addr1, keypair1.verifying_key());
-    session_manager.add_trusted_key(addr2, keypair2.verifying_key());
+    session_manager.add_trusted_key(addr1, keypair1.public_key());
+    session_manager.add_trusted_key(addr2, keypair2.public_key());
 
     // Remove a key
     session_manager.remove_trusted_key(&addr1);

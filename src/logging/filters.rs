@@ -242,22 +242,28 @@ impl DynamicLogFilter {
     where
         F: FnOnce(&mut LogFilter) -> Result<(), Box<dyn std::error::Error>>,
     {
-        let mut filter = self.inner.write().unwrap();
+        let mut filter = self
+            .inner
+            .write()
+            .map_err(|_| -> Box<dyn std::error::Error> { Box::from("log filter lock poisoned".to_string()) })?;
         updater(&mut filter)?;
         Ok(())
     }
 
     /// Check if should log
     pub fn should_log(&self, target: &str, level: Level, message: &str) -> bool {
-        self.inner
-            .read()
-            .unwrap()
-            .should_log(target, level, message)
+        match self.inner.read() {
+            Ok(guard) => guard.should_log(target, level, message),
+            Err(_) => false,
+        }
     }
 
     /// Get level for target
     pub fn level_for(&self, target: &str) -> Option<Level> {
-        self.inner.read().unwrap().level_for(target)
+        match self.inner.read() {
+            Ok(guard) => guard.level_for(target),
+            Err(_) => None,
+        }
     }
 }
 

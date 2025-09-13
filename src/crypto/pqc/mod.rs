@@ -21,14 +21,13 @@ pub mod cipher_suites;
 pub mod combiners;
 pub mod config;
 pub mod encryption;
-pub mod hybrid;
-pub mod hybrid_key_exchange;
 pub mod memory_pool;
 pub mod memory_pool_optimized;
 pub mod ml_dsa;
 pub mod ml_dsa_impl;
 pub mod ml_kem;
 pub mod ml_kem_impl;
+pub mod oids;
 pub mod negotiation;
 pub mod packet_handler;
 pub mod parallel;
@@ -39,13 +38,12 @@ pub mod tls_extensions;
 pub mod tls_integration;
 pub mod types;
 
-/// Post-Quantum Cryptography exports - always available
-pub use config::{HybridPreference, PqcConfig, PqcConfigBuilder, PqcMode};
+/// Post-Quantum Cryptography exports
+pub use config::{PqcConfig, PqcConfigBuilder};
 pub use types::{PqcError, PqcResult};
 
-// PQC algorithm implementations - always available
+// PQC algorithm implementations
 pub use encryption::{EncryptedMessage, HybridPublicKeyEncryption};
-pub use hybrid::{HybridKem, HybridSignature};
 pub use memory_pool::{PoolConfig, PqcMemoryPool};
 pub use ml_dsa::MlDsa65;
 pub use ml_kem::MlKem768;
@@ -108,7 +106,7 @@ use types::{
     MlKemSecretKey, SharedSecret,
 };
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -127,7 +125,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod performance_tests {
     use super::*;
     use std::time::Instant;

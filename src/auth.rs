@@ -5,7 +5,7 @@
 //
 // Full details available at https://saorsalabs.com/licenses
 
-//! Authentication module for P2P connections using Ed25519 keys
+//! Authentication module for P2P connections using ML-DSA-65 keys
 //!
 //! This module provides authentication functionality for P2P connections,
 //! including peer identity verification, challenge-response authentication,
@@ -17,8 +17,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use ed25519_dalek::{
-    Signature, Signer, SigningKey as Ed25519SecretKey, Verifier, VerifyingKey as Ed25519PublicKey,
+use crate::crypto::raw_keys::{
+    MlDsaKeyPair, MlDsaPublicKey, MlDsaSignature as Signature, public_key_to_bytes,
 };
 
 use serde::{Deserialize, Serialize};
@@ -26,9 +26,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, public_key_from_bytes, public_key_to_bytes, verify_peer_id,
-    },
+    crypto::raw_keys::{derive_peer_id_from_public_key, verify_peer_id},
     nat_traversal_api::PeerId,
 };
 
@@ -108,7 +106,7 @@ pub enum AuthMessage {
     /// Initial authentication request with public key
     AuthRequest {
         peer_id: PeerId,
-        public_key: [u8; 32],
+        public_key: Vec<u8>,
         timestamp: SystemTime,
     },
     /// Challenge to verify key ownership
@@ -136,8 +134,8 @@ pub enum AuthMessage {
 pub struct AuthenticatedPeer {
     /// Peer ID derived from public key
     pub peer_id: PeerId,
-    /// Ed25519 public key
-    pub public_key: Ed25519PublicKey,
+    /// ML-DSA-65 public key
+    pub public_key: MlDsaPublicKey,
     /// When authentication was completed
     pub authenticated_at: Instant,
     /// Session ID for this connection
@@ -147,10 +145,10 @@ pub struct AuthenticatedPeer {
 /// Authentication manager for handling peer authentication
 #[derive(Debug)]
 pub struct AuthManager {
-    /// Our Ed25519 secret key
-    secret_key: Ed25519SecretKey,
+    /// Our ML-DSA keypair
+    keypair: MlDsaKeyPair,
     /// Our public key
-    public_key: Ed25519PublicKey,
+    public_key: MlDsaPublicKey,
     /// Our peer ID
     peer_id: PeerId,
     /// Configuration
@@ -171,14 +169,14 @@ struct PendingChallenge {
 
 impl AuthManager {
     /// Create a new authentication manager
-    pub fn new(secret_key: Ed25519SecretKey, config: AuthConfig) -> Self {
-        let public_key = secret_key.verifying_key();
-        let peer_id = derive_peer_id_from_public_key(&public_key);
+    pub fn new(keypair: MlDsaKeyPair, config: AuthConfig) -> Self {
+        let public_key = keypair.public_key();
+        let peer_id = PeerId(derive_peer_id_from_public_key(&public_key));
 
         info!("Initialized AuthManager with peer ID: {:?}", peer_id);
 
         Self {
-            secret_key,
+            keypair,
             public_key,
             peer_id,
             config,
@@ -193,8 +191,8 @@ impl AuthManager {
     }
 
     /// Get our public key bytes
-    pub fn public_key_bytes(&self) -> [u8; 32] {
-        public_key_to_bytes(&self.public_key)
+    pub fn public_key_bytes(&self) -> Vec<u8> {
+        self.public_key.as_bytes().to_vec()
     }
 
     /// Get authentication configuration
@@ -215,13 +213,13 @@ impl AuthManager {
     pub async fn handle_auth_request(
         &self,
         peer_id: PeerId,
-        public_key_bytes: [u8; 32],
+        public_key_bytes: &[u8],
     ) -> Result<AuthMessage, AuthError> {
         // Verify that the peer ID matches the public key
-        let public_key = public_key_from_bytes(&public_key_bytes)
+        let public_key = MlDsaPublicKey::from_bytes(public_key_bytes)
             .map_err(|e| AuthError::KeyError(e.to_string()))?;
 
-        if !verify_peer_id(&peer_id, &public_key) {
+        if !verify_peer_id(&peer_id.0, &public_key) {
             return Err(AuthError::InvalidPeerId);
         }
 
@@ -255,11 +253,14 @@ impl AuthManager {
     /// Create a challenge response
     pub fn create_challenge_response(&self, nonce: [u8; 32]) -> Result<AuthMessage, AuthError> {
         // Sign the nonce with our private key
-        let signature = self.secret_key.sign(&nonce);
+        let signature = self
+            .keypair
+            .sign(&nonce)
+            .map_err(|e| AuthError::SignatureError(e.to_string()))?;
 
         Ok(AuthMessage::ChallengeResponse {
             nonce,
-            signature: signature.to_vec(),
+            signature: signature.as_bytes().to_vec(),
             timestamp: SystemTime::now(),
         })
     }
@@ -268,7 +269,7 @@ impl AuthManager {
     pub async fn verify_challenge_response(
         &self,
         peer_id: PeerId,
-        public_key_bytes: [u8; 32],
+        public_key_bytes: &[u8],
         nonce: [u8; 32],
         signature_bytes: &[u8],
     ) -> Result<AuthMessage, AuthError> {
@@ -299,12 +300,15 @@ impl AuthManager {
         let attempts_ok = attempts < self.config.max_auth_attempts;
 
         // Step 2: Parse keys and signature (always do this)
-        let public_key_result = public_key_from_bytes(&public_key_bytes);
-        let signature_result = Signature::from_slice(signature_bytes);
+        let public_key_result = MlDsaPublicKey::from_bytes(&public_key_bytes);
+        let signature_result = Signature::from_bytes(signature_bytes);
 
         // Step 3: Verify signature (always attempt this)
         let verification_result = match (public_key_result, signature_result) {
-            (Ok(pk), Ok(sig)) => pk.verify(&nonce, &sig).is_ok(),
+            (Ok(pk), Ok(sig)) => {
+                // Verify the signature against the nonce
+                pk.verify_signature(&nonce, &sig).is_ok()
+            }
             _ => false,
         };
 
@@ -332,7 +336,7 @@ impl AuthManager {
             drop(challenges); // Release lock before acquiring peers lock
 
             // Store authenticated peer
-            if let Ok(public_key) = public_key_from_bytes(&public_key_bytes) {
+            if let Ok(public_key) = MlDsaPublicKey::from_bytes(&public_key_bytes) {
                 let mut peers = self.authenticated_peers.write().await;
                 peers.insert(
                     peer_id,
@@ -387,11 +391,11 @@ impl AuthManager {
     pub async fn handle_auth_success(
         &self,
         peer_id: PeerId,
-        public_key_bytes: [u8; 32],
+        public_key_bytes: &[u8],
         session_id: [u8; 32],
     ) -> Result<(), AuthError> {
         // Parse the public key
-        let public_key = public_key_from_bytes(&public_key_bytes)
+        let public_key = MlDsaPublicKey::from_bytes(&public_key_bytes)
             .map_err(|e| AuthError::KeyError(e.to_string()))?;
 
         // Store the authenticated peer
@@ -457,7 +461,7 @@ impl AuthManager {
 pub struct AuthProtocol {
     auth_manager: Arc<AuthManager>,
     /// Temporary storage for public keys during authentication
-    pending_auth: Arc<tokio::sync::RwLock<HashMap<PeerId, [u8; 32]>>>,
+    pending_auth: Arc<tokio::sync::RwLock<HashMap<PeerId, Vec<u8>>>>,
 }
 
 impl AuthProtocol {
@@ -485,10 +489,13 @@ impl AuthProtocol {
                     return Err(AuthError::InvalidPeerId);
                 }
                 // Store the public key for later verification
-                self.pending_auth.write().await.insert(peer_id, public_key);
+                self.pending_auth
+                    .write()
+                    .await
+                    .insert(peer_id, public_key.clone());
                 let response = self
                     .auth_manager
-                    .handle_auth_request(peer_id, public_key)
+                    .handle_auth_request(peer_id, &public_key)
                     .await?;
                 Ok(Some(response))
             }
@@ -501,13 +508,13 @@ impl AuthProtocol {
             } => {
                 // Get the public key from the initial auth request
                 let public_key_bytes = match self.pending_auth.read().await.get(&peer_id) {
-                    Some(key) => *key,
+                    Some(key) => key.clone(),
                     None => return Err(AuthError::PeerNotFound),
                 };
 
                 let response = self
                     .auth_manager
-                    .verify_challenge_response(peer_id, public_key_bytes, nonce, &signature)
+                    .verify_challenge_response(peer_id, &public_key_bytes, nonce, &signature)
                     .await?;
 
                 // Remove the pending auth entry on success
@@ -541,13 +548,13 @@ impl AuthProtocol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::raw_public_keys::key_utils::generate_ed25519_keypair;
+    use crate::crypto::raw_public_keys::key_utils::generate_ml_dsa_keypair;
 
     #[tokio::test]
     async fn test_auth_manager_creation() {
-        let (secret_key, _) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
         let config = AuthConfig::default();
-        let auth_manager = AuthManager::new(secret_key, config);
+        let auth_manager = AuthManager::new(keypair, config);
 
         // Verify peer ID is derived correctly
         let peer_id = auth_manager.peer_id();
@@ -557,11 +564,12 @@ mod tests {
     #[tokio::test]
     async fn test_authentication_flow() {
         // Create two auth managers (simulating two peers)
-        let (secret_key1, public_key1) = generate_ed25519_keypair();
-        let (secret_key2, _) = generate_ed25519_keypair();
+        let keypair1 = generate_ml_dsa_keypair();
+        let public_key1 = keypair1.public_key();
+        let keypair2 = generate_ml_dsa_keypair();
 
-        let auth1 = AuthManager::new(secret_key1, AuthConfig::default());
-        let auth2 = AuthManager::new(secret_key2, AuthConfig::default());
+        let auth1 = AuthManager::new(keypair1, AuthConfig::default());
+        let auth2 = AuthManager::new(keypair2, AuthConfig::default());
 
         // Peer 1 creates auth request
         let auth_request = auth1.create_auth_request();
@@ -573,7 +581,7 @@ mod tests {
                 public_key,
                 ..
             } => auth2
-                .handle_auth_request(*peer_id, *public_key)
+                .handle_auth_request(*peer_id, &public_key)
                 .await
                 .unwrap(),
             _ => panic!("Expected AuthRequest"),
@@ -595,7 +603,7 @@ mod tests {
                 auth2
                     .verify_challenge_response(
                         auth1.peer_id(),
-                        public_key_to_bytes(&public_key1),
+                        &public_key_to_bytes(&public_key1),
                         *nonce,
                         signature,
                     )
@@ -613,16 +621,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_signature() {
-        let (secret_key1, _) = generate_ed25519_keypair();
-        let (secret_key2, public_key2) = generate_ed25519_keypair();
+        let keypair1 = generate_ml_dsa_keypair();
+        let keypair2 = generate_ml_dsa_keypair();
+        let public_key2 = keypair2.public_key();
 
-        let auth1 = AuthManager::new(secret_key1, AuthConfig::default());
-        let _auth2 = AuthManager::new(secret_key2, AuthConfig::default());
+        let auth1 = AuthManager::new(keypair1, AuthConfig::default());
+        let _auth2 = AuthManager::new(keypair2, AuthConfig::default());
 
         // Create a challenge
         let peer_id2 = derive_peer_id_from_public_key(&public_key2);
         let challenge = auth1
-            .handle_auth_request(peer_id2, public_key_to_bytes(&public_key2))
+            .handle_auth_request(PeerId(peer_id2), &public_key_to_bytes(&public_key2))
             .await
             .unwrap();
 
@@ -636,8 +645,8 @@ mod tests {
         // Verification should fail
         let result = auth1
             .verify_challenge_response(
-                peer_id2,
-                public_key_to_bytes(&public_key2),
+                PeerId(peer_id2),
+                &public_key_to_bytes(&public_key2),
                 nonce,
                 &invalid_signature,
             )
@@ -648,18 +657,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_challenge_expiry() {
-        let (secret_key, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let config = AuthConfig {
             challenge_validity: Duration::from_millis(100), // Very short for testing
             ..Default::default()
         };
 
-        let auth = AuthManager::new(secret_key, config);
+        let auth = AuthManager::new(keypair, config);
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         // Create a challenge
         let _challenge = auth
-            .handle_auth_request(peer_id, public_key_to_bytes(&public_key))
+            .handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&public_key))
             .await
             .unwrap();
 
@@ -669,8 +679,8 @@ mod tests {
         // Try to verify - should fail due to expiry
         let result = auth
             .verify_challenge_response(
-                peer_id,
-                public_key_to_bytes(&public_key),
+                PeerId(peer_id),
+                &public_key_to_bytes(&public_key),
                 [0u8; 32],  // dummy nonce
                 &[0u8; 64], // dummy signature
             )
@@ -681,12 +691,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_message_serialization() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = MlDsaKeyPair::generate().unwrap();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         let msg = AuthMessage::AuthRequest {
-            peer_id,
-            public_key: public_key_to_bytes(&public_key),
+            peer_id: PeerId(peer_id),
+            public_key: public_key.as_bytes().to_vec(),
             timestamp: SystemTime::now(),
         };
 

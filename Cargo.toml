@@ -30,20 +30,12 @@ exclude = [
 ]
 
 [features]
-# Default features include only essential functionality
-default = ["platform-verifier", "network-discovery", "runtime-tokio", "rustls-ring"]
+# Default features - PQC is always enabled
+default = ["network-discovery", "runtime-tokio", "rustls-aws-lc-rs"]
 
-# Crypto providers
-rustls-ring = ["dep:rustls", "rustls?/ring", "ring"]
-rustls-aws-lc-rs = ["dep:rustls", "rustls?/aws-lc-rs", "aws-lc-rs"]
-aws-lc-rs = ["dep:aws-lc-rs", "aws-lc-rs?/aws-lc-sys", "aws-lc-rs?/prebuilt-nasm"]
-ring = ["dep:ring"]
-
-# Platform-specific certificate verification
-platform-verifier = ["dep:rustls-platform-verifier"]
-
-# Configure `tracing` to log events via `log` if no `tracing` subscriber exists
-log = ["tracing/log"]
+# Crypto provider features
+rustls-aws-lc-rs = ["rustls/aws_lc_rs"]
+rustls-ring = ["rustls/ring"]
 
 # Enhanced network interface discovery
 network-discovery = ["dep:socket2", "dep:nix"]
@@ -52,13 +44,13 @@ network-discovery = ["dep:socket2", "dep:nix"]
 runtime-tokio = []
 runtime-async-std = ["dep:async-std", "dep:async-io"]
 
+# Configure `tracing` to log events via `log` if no `tracing` subscriber exists
+log = ["tracing/log"]
+
 # Additional features
 arbitrary = ["dep:arbitrary"]
 __qlog = ["dep:qlog"]
 bloom = []
-
-# Post-Quantum Cryptography support
-pqc = ["saorsa-pqc", "aws-lc-rs"]
 
 # Zero-cost tracing system
 trace = []
@@ -78,11 +70,7 @@ windows-tests = ["platform-tests"]
 low_memory = []
 
 # Metrics features
-# Note: prometheus feature is excluded from docs.rs builds due to compilation issues
 prometheus = ["dep:prometheus", "dep:warp", "dep:tokio-stream"]
-
-# Test features
-security_validation_not_yet_implemented = []
 
 # Enhanced testing features
 property_testing = ["proptest", "proptest-derive"]
@@ -100,11 +88,11 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-ed25519-dalek = { version = "2.1", features = ["rand_core"] }
-x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 
-# Post-Quantum Cryptography
-saorsa-pqc = { version = "0.3.5", optional = true }
+# Post-Quantum Cryptography (always enabled)
+saorsa-pqc = { version = "0.3.5" }
+# Basic crypto utilities (for hashing, random, etc.)
+aws-lc-rs = { version = "1.9", default-features = false, features = ["unstable", "aws-lc-sys"] }
 
 # Data structures
 slab = "0.4.11"
@@ -112,11 +100,8 @@ indexmap = "2.0"
 parking_lot = "0.12"
 lru-slab = "0.1.2"
 
-# Crypto dependencies (optional)
-rustls = { version = "0.23.5", default-features = false, features = ["std"], optional = true }
-ring = { version = "0.17", optional = true }
-aws-lc-rs = { version = "1.9", default-features = false, features = ["unstable"], optional = true }
-rustls-platform-verifier = { version = "0.6", optional = true }
+# TLS framework (needed for TLS structure, but using PQC crypto)
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
 
 # Network discovery dependencies (optional)
 socket2 = { version = "0.5", optional = true }
@@ -279,11 +264,6 @@ features = ["rustls-aws-lc-rs", "rustls-ring", "platform-verifier", "log"]
 
 # Realistic clippy configuration - focus on meaningful issues
 [lints.clippy]
-# Allow unwrap/expect in specific contexts - they're often used for invariants
-# that should never be violated and are clearer than complex error handling
-unwrap_used = { level = "allow", priority = 2 }
-expect_used = { level = "allow", priority = 2 }
-
 # Allow indexing - often used for accessing known-good indices in hot paths
 indexing_slicing = { level = "allow", priority = 2 }
 

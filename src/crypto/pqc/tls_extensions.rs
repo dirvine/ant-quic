@@ -349,111 +349,59 @@ impl RustlsIntegration for SignatureScheme {
     }
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_named_group_conversions() {
-        // Test classical groups
-        assert_eq!(NamedGroup::X25519.to_u16(), 0x001D);
-        assert_eq!(NamedGroup::from_u16(0x001D), Some(NamedGroup::X25519));
-
-        // Test PQC groups
+        // Test PQC groups only
         assert_eq!(NamedGroup::MlKem768.to_u16(), 0x0201);
         assert_eq!(NamedGroup::from_u16(0x0201), Some(NamedGroup::MlKem768));
-
-        // Test hybrid groups
-        assert_eq!(NamedGroup::X25519MlKem768.to_u16(), 0x4F2A);
-        assert_eq!(
-            NamedGroup::from_u16(0x4F2A),
-            Some(NamedGroup::X25519MlKem768)
-        );
     }
 
     #[test]
     fn test_named_group_classification() {
-        // Classical
-        assert!(NamedGroup::X25519.is_classical());
-        assert!(!NamedGroup::X25519.is_pqc());
-        assert!(!NamedGroup::X25519.is_hybrid());
-
         // PQC
         assert!(!NamedGroup::MlKem768.is_classical());
         assert!(NamedGroup::MlKem768.is_pqc());
         assert!(!NamedGroup::MlKem768.is_hybrid());
-
-        // Hybrid
-        assert!(!NamedGroup::X25519MlKem768.is_classical());
-        assert!(!NamedGroup::X25519MlKem768.is_pqc());
-        assert!(NamedGroup::X25519MlKem768.is_hybrid());
     }
 
-    #[test]
-    fn test_hybrid_components() {
-        let hybrid = NamedGroup::X25519MlKem768;
-        assert_eq!(hybrid.classical_component(), Some(NamedGroup::X25519));
-        assert_eq!(hybrid.pqc_component(), Some(NamedGroup::MlKem768));
-
-        let classical = NamedGroup::X25519;
-        assert_eq!(classical.classical_component(), None);
-        assert_eq!(classical.pqc_component(), None);
-    }
+    // Hybrid tests removed for PQC-only branch
 
     #[test]
     fn test_signature_scheme_conversions() {
-        // Test classical schemes
-        assert_eq!(SignatureScheme::Ed25519.to_u16(), 0x0807);
-        assert_eq!(
-            SignatureScheme::from_u16(0x0807),
-            Some(SignatureScheme::Ed25519)
-        );
-
         // Test PQC schemes
         assert_eq!(SignatureScheme::MlDsa65.to_u16(), 0x0901);
         assert_eq!(
             SignatureScheme::from_u16(0x0901),
             Some(SignatureScheme::MlDsa65)
         );
-
-        // Test hybrid schemes
-        assert_eq!(SignatureScheme::Ed25519MlDsa65.to_u16(), 0x0920);
-        assert_eq!(
-            SignatureScheme::from_u16(0x0920),
-            Some(SignatureScheme::Ed25519MlDsa65)
-        );
     }
 
     #[test]
     fn test_wire_format_serialization() {
-        // Test NamedGroup
-        let group = NamedGroup::X25519MlKem768;
+        // Test NamedGroup (PQC)
+        let group = NamedGroup::MlKem768;
         let bytes = group.to_bytes();
-        assert_eq!(bytes, [0x4F, 0x2A]);
+        assert_eq!(bytes, [0x02, 0x01]);
         assert_eq!(NamedGroup::from_bytes(&bytes).unwrap(), group);
 
-        // Test SignatureScheme
-        let scheme = SignatureScheme::Ed25519MlDsa65;
+        // Test SignatureScheme (PQC)
+        let scheme = SignatureScheme::MlDsa65;
         let bytes = scheme.to_bytes();
-        assert_eq!(bytes, [0x09, 0x20]);
+        assert_eq!(bytes, [0x09, 0x01]);
         assert_eq!(SignatureScheme::from_bytes(&bytes).unwrap(), scheme);
     }
 
     #[test]
     #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs"))]
     fn test_rustls_integration() {
-        // Test classical mapping
-        let group = NamedGroup::X25519;
-        assert!(group.to_rustls_named_group().is_some());
-
-        // Test PQC mapping (should be None)
+        // PQC mapping (should be None)
         let pqc_group = NamedGroup::MlKem768;
         assert!(pqc_group.to_rustls_named_group().is_none());
-
-        // Test signature scheme mapping
-        let scheme = SignatureScheme::Ed25519;
-        assert!(scheme.to_rustls_signature_scheme().is_some());
-
+        // PQC signature mapping (should be None)
         let pqc_scheme = SignatureScheme::MlDsa65;
         assert!(pqc_scheme.to_rustls_signature_scheme().is_none());
     }

@@ -1,8 +1,6 @@
 //! Tests for Post-Quantum Cryptography configuration API
 
-#![cfg(feature = "pqc")]
-
-use ant_quic::crypto::pqc::{HybridPreference, PqcConfig, PqcMode};
+use ant_quic::crypto::pqc::{PqcConfig};
 use ant_quic::{
     EndpointConfig,
     crypto::{CryptoError, HmacKey},
@@ -37,9 +35,8 @@ impl HmacKey for TestHmacKey {
 fn test_pqc_config_integration_with_endpoint() {
     // Create a PQC config
     let pqc_config = PqcConfig::builder()
-        .mode(PqcMode::Hybrid)
-        .hybrid_preference(HybridPreference::PreferPqc)
         .memory_pool_size(20)
+        .handshake_timeout_multiplier(2.0)
         .build()
         .unwrap();
 
@@ -50,126 +47,36 @@ fn test_pqc_config_integration_with_endpoint() {
     // Set PQC config
     endpoint_config.pqc_config(pqc_config.clone());
 
-    // Verify it was set (we can't directly access it due to pub(crate), but this tests compilation)
-    // In a real scenario, the endpoint would use this config during connection establishment
+    // Verify the configuration was set
+    assert_eq!(pqc_config.memory_pool_size, 20);
+    assert_eq!(pqc_config.handshake_timeout_multiplier, 2.0);
 }
 
 #[test]
-fn test_pqc_config_default_is_safe() {
+fn test_pqc_config_defaults() {
     let config = PqcConfig::default();
-
-    // Default should be Hybrid mode for compatibility
-    assert_eq!(config.mode, PqcMode::Hybrid);
-
-    // Both algorithms should be enabled by default
+    
+    // PQC is always enabled
     assert!(config.ml_kem_enabled);
     assert!(config.ml_dsa_enabled);
-
-    // Balanced preference is the safest default
-    assert_eq!(config.hybrid_preference, HybridPreference::Balanced);
-
-    // Reasonable defaults for performance
+    
+    // Check default values
     assert_eq!(config.memory_pool_size, 10);
     assert_eq!(config.handshake_timeout_multiplier, 2.0);
 }
 
 #[test]
-fn test_pqc_config_builder_chaining() {
+fn test_pqc_config_builder_customization() {
     let config = PqcConfig::builder()
-        .mode(PqcMode::PqcOnly)
         .ml_kem(true)
         .ml_dsa(true)
-        .hybrid_preference(HybridPreference::PreferPqc)
         .memory_pool_size(50)
-        .handshake_timeout_multiplier(3.0)
+        .handshake_timeout_multiplier(3.5)
         .build()
         .unwrap();
-
-    assert_eq!(config.mode, PqcMode::PqcOnly);
+    
     assert!(config.ml_kem_enabled);
     assert!(config.ml_dsa_enabled);
-    assert_eq!(config.hybrid_preference, HybridPreference::PreferPqc);
     assert_eq!(config.memory_pool_size, 50);
-    assert_eq!(config.handshake_timeout_multiplier, 3.0);
-}
-
-#[test]
-fn test_classical_only_configuration() {
-    // For environments that don't want PQC yet
-    let config = PqcConfig::builder()
-        .mode(PqcMode::ClassicalOnly)
-        .ml_kem(false)
-        .ml_dsa(false)
-        .build()
-        .unwrap();
-
-    assert_eq!(config.mode, PqcMode::ClassicalOnly);
-    assert!(!config.ml_kem_enabled);
-    assert!(!config.ml_dsa_enabled);
-}
-
-#[test]
-fn test_pqc_only_with_selective_algorithms() {
-    // Enable only ML-KEM for key exchange, use classical signatures
-    let config = PqcConfig::builder()
-        .mode(PqcMode::Hybrid)
-        .ml_kem(true)
-        .ml_dsa(false)
-        .build()
-        .unwrap();
-
-    assert!(config.ml_kem_enabled);
-    assert!(!config.ml_dsa_enabled);
-}
-
-#[test]
-fn test_performance_tuning_options() {
-    // Configure for high-performance environment
-    let config = PqcConfig::builder()
-        .memory_pool_size(100) // Larger pool for many concurrent connections
-        .handshake_timeout_multiplier(1.5) // Less conservative timeout
-        .build()
-        .unwrap();
-
-    assert_eq!(config.memory_pool_size, 100);
-    assert_eq!(config.handshake_timeout_multiplier, 1.5);
-}
-
-#[test]
-fn test_example_usage_patterns() {
-    // Example 1: Conservative migration to PQC
-    let conservative_config = PqcConfig::builder()
-        .mode(PqcMode::Hybrid)
-        .hybrid_preference(HybridPreference::PreferClassical)
-        .build()
-        .unwrap();
-
-    assert_eq!(
-        conservative_config.hybrid_preference,
-        HybridPreference::PreferClassical
-    );
-
-    // Example 2: Aggressive PQC adoption
-    let aggressive_config = PqcConfig::builder()
-        .mode(PqcMode::Hybrid)
-        .hybrid_preference(HybridPreference::PreferPqc)
-        .handshake_timeout_multiplier(4.0) // Allow more time for larger handshakes
-        .build()
-        .unwrap();
-
-    assert_eq!(
-        aggressive_config.hybrid_preference,
-        HybridPreference::PreferPqc
-    );
-
-    // Example 3: Testing PQC-only environment
-    let test_config = PqcConfig::builder()
-        .mode(PqcMode::PqcOnly)
-        .ml_kem(true)
-        .ml_dsa(true)
-        .memory_pool_size(5) // Smaller pool for testing
-        .build()
-        .unwrap();
-
-    assert_eq!(test_config.mode, PqcMode::PqcOnly);
+    assert_eq!(config.handshake_timeout_multiplier, 3.5);
 }

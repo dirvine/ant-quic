@@ -11,9 +11,9 @@
 //! handshake process, ensuring proper algorithm selection and fallback.
 
 use crate::crypto::pqc::{
-    config::{PqcConfig, PqcMode},
+    config::PqcConfig,
     negotiation::{
-        NegotiationResult, PqcNegotiator, filter_algorithms_for_mode, order_by_preference,
+        NegotiationResult, PqcNegotiator, filter_algorithms_for_pqc_only, order_by_pqc_preference,
     },
     tls_extensions::{NamedGroup, SignatureScheme},
     types::*,
@@ -24,8 +24,8 @@ use tracing::{debug, info, warn};
 /// TLS handshake extension for PQC negotiation
 #[derive(Debug, Clone)]
 pub struct PqcHandshakeExtension {
-    /// PQC configuration
-    config: Arc<PqcConfig>,
+    /// PQC configuration (kept for future use)
+    _config: Arc<PqcConfig>,
     /// Negotiator instance
     negotiator: PqcNegotiator,
 }
@@ -34,7 +34,7 @@ impl PqcHandshakeExtension {
     /// Create a new PQC handshake extension
     pub fn new(config: Arc<PqcConfig>) -> Self {
         let negotiator = PqcNegotiator::new((*config).clone());
-        Self { config, negotiator }
+        Self { _config: config, negotiator }
     }
 
     /// Process ClientHello and filter supported algorithms
@@ -104,16 +104,16 @@ impl PqcHandshakeExtension {
         Ok(result)
     }
 
-    /// Get filtered algorithms for client based on mode
+    /// Get filtered algorithms for client (PQC-only)
     pub fn get_client_algorithms(&self) -> (Vec<u16>, Vec<u16>) {
         let all_groups = Self::all_supported_groups();
         let all_signatures = Self::all_supported_signatures();
 
         let (mut groups, mut signatures) =
-            filter_algorithms_for_mode(self.config.mode, &all_groups, &all_signatures);
+            filter_algorithms_for_pqc_only(&all_groups, &all_signatures);
 
-        // Order by preference
-        order_by_preference(self.config.mode, &mut groups, &mut signatures);
+        // Order by preference (PQC-first)
+        order_by_pqc_preference(&mut groups, &mut signatures);
 
         // Convert to wire format
         let group_codes: Vec<u16> = groups.iter().map(|g| g.to_u16()).collect();
@@ -122,40 +122,19 @@ impl PqcHandshakeExtension {
         (group_codes, sig_codes)
     }
 
-    /// Get all supported named groups
+    /// Get all supported named groups (PQC-only)
     fn all_supported_groups() -> Vec<NamedGroup> {
         vec![
-            // Classical
-            NamedGroup::Secp256r1,
-            NamedGroup::Secp384r1,
-            NamedGroup::Secp521r1,
-            NamedGroup::X25519,
-            NamedGroup::X448,
-            // Hybrid
-            NamedGroup::X25519MlKem768,
-            NamedGroup::P256MlKem768,
-            NamedGroup::P384MlKem1024,
-            // Pure PQC (if supported)
+            // Pure PQC only - no classical or hybrid algorithms
             NamedGroup::MlKem768,
             NamedGroup::MlKem1024,
         ]
     }
 
-    /// Get all supported signature schemes
+    /// Get all supported signature schemes (PQC-only)
     fn all_supported_signatures() -> Vec<SignatureScheme> {
         vec![
-            // Classical
-            SignatureScheme::EcdsaSecp256r1Sha256,
-            SignatureScheme::EcdsaSecp384r1Sha384,
-            SignatureScheme::Ed25519,
-            SignatureScheme::Ed448,
-            SignatureScheme::RsaPssRsaeSha256,
-            SignatureScheme::RsaPssRsaeSha384,
-            // Hybrid
-            SignatureScheme::EcdsaP256MlDsa65,
-            SignatureScheme::EcdsaP384MlDsa87,
-            SignatureScheme::Ed25519MlDsa65,
-            // Pure PQC (if supported)
+            // Pure PQC only - no classical or hybrid algorithms
             SignatureScheme::MlDsa65,
             SignatureScheme::MlDsa87,
         ]
@@ -254,7 +233,7 @@ pub fn estimate_handshake_size(state: &PqcHandshakeState) -> usize {
     size
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -270,15 +249,9 @@ mod tests {
         let config = Arc::new(PqcConfig::default());
         let mut extension = PqcHandshakeExtension::new(config);
 
-        // Simulate ClientHello with groups and signatures
-        let groups = vec![
-            NamedGroup::X25519.to_u16(),
-            NamedGroup::X25519MlKem768.to_u16(),
-        ];
-        let signatures = vec![
-            SignatureScheme::Ed25519.to_u16(),
-            SignatureScheme::Ed25519MlDsa65.to_u16(),
-        ];
+        // Simulate ClientHello with pure-PQC groups and signatures
+        let groups = vec![NamedGroup::MlKem768.to_u16(), NamedGroup::MlKem1024.to_u16()];
+        let signatures = vec![SignatureScheme::MlDsa65.to_u16(), SignatureScheme::MlDsa87.to_u16()];
 
         extension
             .process_client_hello(&groups, &signatures)
@@ -288,48 +261,22 @@ mod tests {
     }
 
     #[test]
-    fn test_get_client_algorithms_classical_only() {
-        let config = Arc::new(
-            PqcConfig::builder()
-                .mode(PqcMode::ClassicalOnly)
-                .build()
-                .unwrap(),
-        );
-        let extension = PqcHandshakeExtension::new(config);
-
-        let (groups, signatures) = extension.get_client_algorithms();
-
-        // Should only contain classical algorithms
-        for &group_code in &groups {
-            if let Some(group) = NamedGroup::from_u16(group_code) {
-                assert!(!group.is_hybrid() && !group.is_pqc());
-            }
-        }
-
-        for &sig_code in &signatures {
-            if let Some(sig) = SignatureScheme::from_u16(sig_code) {
-                assert!(!sig.is_hybrid() && !sig.is_pqc());
-            }
-        }
-    }
-
-    #[test]
     fn test_get_client_algorithms_pqc_only() {
-        let config = Arc::new(PqcConfig::builder().mode(PqcMode::PqcOnly).build().unwrap());
+        let config = Arc::new(PqcConfig::builder().build().unwrap());
         let extension = PqcHandshakeExtension::new(config);
 
         let (groups, signatures) = extension.get_client_algorithms();
 
-        // Should only contain PQC algorithms
+        // Should only contain pure PQC algorithms (no classical or hybrid)
         for &group_code in &groups {
             if let Some(group) = NamedGroup::from_u16(group_code) {
-                assert!(group.is_hybrid() || group.is_pqc());
+                assert!(group.is_pqc() && !group.is_hybrid());
             }
         }
 
         for &sig_code in &signatures {
             if let Some(sig) = SignatureScheme::from_u16(sig_code) {
-                assert!(sig.is_hybrid() || sig.is_pqc());
+                assert!(sig.is_pqc() && !sig.is_hybrid());
             }
         }
     }
@@ -341,8 +288,8 @@ mod tests {
         assert!(!state.is_pqc());
 
         let result = NegotiationResult {
-            key_exchange: Some(NamedGroup::X25519MlKem768),
-            signature_scheme: Some(SignatureScheme::Ed25519MlDsa65),
+            key_exchange: Some(NamedGroup::MlKem768),
+            signature_scheme: Some(SignatureScheme::MlDsa65),
             used_pqc: true,
             reason: "Test negotiation".to_string(),
         };
@@ -350,11 +297,8 @@ mod tests {
         state.update_from_result(&result);
         assert!(state.started);
         assert!(state.is_pqc());
-        assert_eq!(state.key_exchange, Some(NamedGroup::X25519MlKem768));
-        assert_eq!(
-            state.signature_scheme,
-            Some(SignatureScheme::Ed25519MlDsa65)
-        );
+        assert_eq!(state.key_exchange, Some(NamedGroup::MlKem768));
+        assert_eq!(state.signature_scheme, Some(SignatureScheme::MlDsa65));
     }
 
     #[test]
@@ -373,12 +317,12 @@ mod tests {
         // Classical only
         assert_eq!(estimate_handshake_size(&state), 4096);
 
-        // With hybrid key exchange
-        state.key_exchange = Some(NamedGroup::X25519MlKem768);
+        // With PQC key exchange
+        state.key_exchange = Some(NamedGroup::MlKem768);
         assert_eq!(estimate_handshake_size(&state), 4096 + 2272);
 
-        // With hybrid signature too
-        state.signature_scheme = Some(SignatureScheme::Ed25519MlDsa65);
+        // With PQC signature too
+        state.signature_scheme = Some(SignatureScheme::MlDsa65);
         assert_eq!(estimate_handshake_size(&state), 4096 + 2272 + 5261);
     }
 
@@ -387,10 +331,10 @@ mod tests {
         let mut state = PqcHandshakeState::new();
         assert_eq!(state.selected_algorithms(), "No algorithms selected");
 
-        state.key_exchange = Some(NamedGroup::X25519);
-        assert_eq!(state.selected_algorithms(), "x25519 (no signature)");
+        state.key_exchange = Some(NamedGroup::MlKem768);
+        assert_eq!(state.selected_algorithms(), "ml_kem_768 (no signature)");
 
-        state.signature_scheme = Some(SignatureScheme::Ed25519);
-        assert_eq!(state.selected_algorithms(), "x25519 + ed25519");
+        state.signature_scheme = Some(SignatureScheme::MlDsa65);
+        assert_eq!(state.selected_algorithms(), "ml_kem_768 + ml_dsa_65");
     }
 }

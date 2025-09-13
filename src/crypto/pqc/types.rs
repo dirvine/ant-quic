@@ -269,6 +269,48 @@ impl MlDsaPublicKey {
         key.copy_from_slice(bytes);
         Ok(Self(key))
     }
+
+    /// Verify a signature against this public key
+    pub fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &MlDsaSignature,
+    ) -> Result<(), PqcError> {
+        // Use saorsa_pqc to verify the signature
+        use saorsa_pqc::{MlDsa65, MlDsaOperations};
+
+        // Create public key from bytes
+        let pk = match saorsa_pqc::MlDsaPublicKey::from_bytes(self.as_bytes()) {
+            Ok(pk) => pk,
+            Err(e) => {
+                return Err(PqcError::VerificationFailed(format!(
+                    "Invalid public key: {}",
+                    e
+                )));
+            }
+        };
+
+        // Create signature from bytes
+        let sig = match saorsa_pqc::MlDsaSignature::from_bytes(signature.as_bytes()) {
+            Ok(sig) => sig,
+            Err(e) => {
+                return Err(PqcError::VerificationFailed(format!(
+                    "Invalid signature: {}",
+                    e
+                )));
+            }
+        };
+
+        // Verify the signature
+        let ml_dsa = MlDsa65::new();
+        match ml_dsa.verify(&pk, message, &sig) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(PqcError::VerificationFailed(
+                "Signature verification failed".to_string(),
+            )),
+            Err(e) => Err(PqcError::VerificationFailed(e.to_string())),
+        }
+    }
 }
 
 impl Serialize for MlDsaPublicKey {
@@ -482,7 +524,7 @@ pub struct HybridSignatureValue {
     pub ml_dsa: Box<[u8]>,
 }
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

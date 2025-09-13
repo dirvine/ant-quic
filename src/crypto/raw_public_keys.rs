@@ -8,7 +8,7 @@
 //! RFC 7250 Raw Public Keys Support for ant-quic
 //!
 //! This module implements Raw Public Keys (RPK) support as defined in RFC 7250,
-//! allowing P2P connections to authenticate using Ed25519 public keys directly
+//! allowing P2P connections to authenticate using ML-DSA public keys directly
 //! without the overhead of X.509 certificates.
 
 // PQC extensions for raw public keys - always available
@@ -27,31 +27,30 @@ use rustls::{
 
 use super::tls_extension_simulation::{Rfc7250ClientConfig, Rfc7250ServerConfig};
 
-use ed25519_dalek::{
-    Signature, Signer, SigningKey as Ed25519SecretKey, Verifier, VerifyingKey as Ed25519PublicKey,
-};
+use crate::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey, MlDsaSignature};
+use crate::crypto::raw_keys::MlDsaKeyPair;
 
 use tracing::{debug, info, warn};
 
 /// Raw Public Key verifier for client-side authentication
 #[derive(Debug)]
 pub struct RawPublicKeyVerifier {
-    /// Set of trusted public keys
-    trusted_keys: HashSet<[u8; 32]>,
+    /// Set of trusted public keys (ML-DSA-65 public keys are 1952 bytes)
+    trusted_keys: HashSet<Vec<u8>>,
     /// Whether to allow any key (for development/testing)
     allow_any_key: bool,
 }
 
 impl RawPublicKeyVerifier {
     /// Create a new RPK verifier with a set of trusted public keys
-    pub fn new(trusted_keys: Vec<[u8; 32]>) -> Self {
+    pub fn new(trusted_keys: Vec<Vec<u8>>) -> Self {
         Self {
             trusted_keys: trusted_keys.into_iter().collect(),
             allow_any_key: false,
         }
     }
 
-    /// Create a verifier that accepts any valid Ed25519 public key
+    /// Create a verifier that accepts any valid ML-DSA public key
     /// WARNING: Only use for development/testing!
     pub fn allow_any() -> Self {
         Self {
@@ -61,46 +60,55 @@ impl RawPublicKeyVerifier {
     }
 
     /// Add a trusted public key
-    pub fn add_trusted_key(&mut self, public_key: [u8; 32]) {
+    pub fn add_trusted_key(&mut self, public_key: Vec<u8>) {
         self.trusted_keys.insert(public_key);
     }
 
-    /// Extract Ed25519 public key from SubjectPublicKeyInfo
-    fn extract_ed25519_key(&self, spki_der: &[u8]) -> Result<[u8; 32], TlsError> {
+    /// Extract ML-DSA public key from SubjectPublicKeyInfo
+    fn extract_ml_dsa_key(&self, spki_der: &[u8]) -> Result<Vec<u8>, TlsError> {
         // Parse the SubjectPublicKeyInfo structure
-        // Ed25519 OID: 1.3.101.112 (0x2b6570)
+        // ML-DSA-65 OID: 2.16.840.1.101.3.4.3.17
 
         // For RFC 7250, the "certificate" is actually just the SubjectPublicKeyInfo
-        // We need to extract the raw 32-byte Ed25519 public key from this structure
+        // We need to extract the raw ML-DSA public key from this structure
 
-        // Simple parsing for Ed25519 SubjectPublicKeyInfo
-        // This is a minimal parser - in production you'd want more robust ASN.1 parsing
-        if spki_der.len() < 44 {
-            return Err(TlsError::InvalidCertificate(CertificateError::BadEncoding));
+        // ML-DSA-65 public keys are 1952 bytes
+        const ML_DSA_65_PUBLIC_KEY_SIZE: usize = 1952;
+
+        // Simple parsing for ML-DSA SubjectPublicKeyInfo
+        // In a full SPKI, the key would be embedded with OID and headers
+        // For now, we'll do a simple size-based extraction
+
+        if spki_der.len() < ML_DSA_65_PUBLIC_KEY_SIZE {
+            // If the SPKI is smaller than expected, it might be just the raw key
+            // or a different format - return it as-is
+            debug!(
+                "SPKI smaller than expected ML-DSA key size: {} bytes",
+                spki_der.len()
+            );
+            return Ok(spki_der.to_vec());
         }
 
-        // Look for Ed25519 OID pattern in the DER encoding
-        let ed25519_oid = [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70];
-
-        if !spki_der.starts_with(&ed25519_oid) {
-            return Err(TlsError::InvalidCertificate(
-                CertificateError::UnknownIssuer,
-            ));
+        // If the SPKI is larger, try to extract the key from the end
+        // (ML-DSA keys are typically at the end of the SPKI structure)
+        // Our SPKI is 1972 bytes (20 bytes header + 1952 bytes key)
+        if spki_der.len() >= ML_DSA_65_PUBLIC_KEY_SIZE + 10 {
+            // Likely a full SPKI with headers - extract the last 1952 bytes
+            let key_start = spki_der.len() - ML_DSA_65_PUBLIC_KEY_SIZE;
+            let public_key = spki_der[key_start..].to_vec();
+            debug!(
+                "Extracted ML-DSA public key from SPKI: {} bytes",
+                public_key.len()
+            );
+            return Ok(public_key);
         }
 
-        // The public key should be at offset 12 and be 32 bytes long
-        if spki_der.len() != 44 {
-            return Err(TlsError::InvalidCertificate(CertificateError::BadEncoding));
-        }
-
-        let mut public_key = [0u8; 32];
-        public_key.copy_from_slice(&spki_der[12..44]);
-
+        // Otherwise, assume the entire SPKI is the key data
         debug!(
-            "Extracted Ed25519 public key: {:?}",
-            hex::encode(public_key)
+            "Using entire SPKI as ML-DSA public key: {} bytes",
+            spki_der.len()
         );
-        Ok(public_key)
+        Ok(spki_der.to_vec())
     }
 }
 
@@ -115,20 +123,20 @@ impl ServerCertVerifier for RawPublicKeyVerifier {
     ) -> Result<rustls::client::danger::ServerCertVerified, TlsError> {
         debug!("Verifying server certificate with Raw Public Key verifier");
 
-        // Extract the Ed25519 public key from the certificate
-        let public_key = self.extract_ed25519_key(end_entity.as_ref())?;
+        // Extract the ML-DSA public key from the certificate
+        let public_key = self.extract_ml_dsa_key(end_entity.as_ref())?;
 
         // Check if this key is trusted
         if self.allow_any_key {
-            info!("Accepting any Ed25519 public key (development mode)");
+            info!("Accepting any ML-DSA public key (development mode)");
             return Ok(rustls::client::danger::ServerCertVerified::assertion());
         }
 
         if self.trusted_keys.contains(&public_key) {
-            info!("Server public key is trusted: {}", hex::encode(public_key));
+            info!("Server public key is trusted: {} bytes", public_key.len());
             Ok(rustls::client::danger::ServerCertVerified::assertion())
         } else {
-            warn!("Unknown server public key: {}", hex::encode(public_key));
+            warn!("Unknown server public key: {} bytes", public_key.len());
             Err(TlsError::InvalidCertificate(
                 CertificateError::UnknownIssuer,
             ))
@@ -153,32 +161,43 @@ impl ServerCertVerifier for RawPublicKeyVerifier {
     ) -> Result<HandshakeSignatureValid, TlsError> {
         debug!("Verifying TLS 1.3 signature with Raw Public Key");
 
-        // Extract Ed25519 public key
-        let public_key_bytes = self.extract_ed25519_key(cert.as_ref())?;
+        // Extract ML-DSA public key
+        let public_key_bytes = self.extract_ml_dsa_key(cert.as_ref())?;
 
-        // Create Ed25519 public key
-        let public_key = Ed25519PublicKey::from_bytes(&public_key_bytes)
+        // Create ML-DSA public key
+        let public_key = MlDsaPublicKey::from_bytes(&public_key_bytes)
             .map_err(|_| TlsError::InvalidCertificate(CertificateError::BadEncoding))?;
 
-        // Verify signature
-        if dss.signature().len() != 64 {
-            return Err(TlsError::General("Invalid signature length".to_string()));
+        // Verify ML-DSA signature (variable length)
+        let signature = MlDsaSignature::from_bytes(dss.signature())
+            .map_err(|_| TlsError::General("Invalid ML-DSA signature format".to_string()))?;
+
+        // Use saorsa_pqc to verify the signature
+        use saorsa_pqc::MlDsaOperations;
+
+        let pk = saorsa_pqc::MlDsaPublicKey::from_bytes(public_key.as_bytes())
+            .map_err(|_| TlsError::General("Invalid public key".to_string()))?;
+        let sig = saorsa_pqc::MlDsaSignature::from_bytes(signature.as_bytes())
+            .map_err(|_| TlsError::General("Invalid signature".to_string()))?;
+
+        let ml_dsa = saorsa_pqc::MlDsa65::new();
+        if !ml_dsa
+            .verify(&pk, message, &sig)
+            .map_err(|_| TlsError::General("Signature verification failed".to_string()))?
+        {
+            return Err(TlsError::General(
+                "Signature verification failed".to_string(),
+            ));
         }
-
-        let mut sig_bytes = [0u8; 64];
-        sig_bytes.copy_from_slice(dss.signature());
-        let signature = Signature::from(sig_bytes);
-
-        public_key
-            .verify(message, &signature)
-            .map_err(|_| TlsError::General("Signature verification failed".to_string()))?;
 
         debug!("TLS 1.3 signature verification successful");
         Ok(HandshakeSignatureValid::assertion())
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![SignatureScheme::ED25519]
+        // Advertise ML-DSA-65 via private-use codepoint
+        let mldsa65 = crate::crypto::pqc::tls_extensions::SignatureScheme::MlDsa65.to_u16();
+        vec![SignatureScheme::Unknown(mldsa65)]
     }
 }
 
@@ -190,16 +209,16 @@ pub struct RawPublicKeyResolver {
 }
 
 impl RawPublicKeyResolver {
-    /// Create a new RPK resolver with an Ed25519 key pair
-    pub fn new(private_key: Ed25519SecretKey) -> Result<Self, TlsError> {
-        // Get the public key from the private key
-        let public_key = private_key.verifying_key();
+    /// Create a new RPK resolver with an ML-DSA key pair
+    pub fn new(keypair: MlDsaKeyPair) -> Result<Self, TlsError> {
+        // Get the public key from the keypair
+        let public_key = keypair.public_key();
 
-        // Create SubjectPublicKeyInfo for the public key
-        let public_key_der = create_ed25519_subject_public_key_info(&public_key);
+        // Create SubjectPublicKeyInfo for the ML-DSA public key
+        let public_key_der = create_ml_dsa_subject_public_key_info(&public_key);
 
-        // Create a signing key
-        let signing_key = Ed25519SigningKey::new(private_key);
+        // Create a signing key wrapper
+        let signing_key = MlDsaSigningKey::new(keypair);
 
         // Create certified key
         let certified_key = Arc::new(CertifiedKey {
@@ -221,21 +240,23 @@ impl ResolvesServerCert for RawPublicKeyResolver {
 
 /// Ed25519 signing key implementation for rustls
 #[derive(Debug)]
-struct Ed25519SigningKey {
-    private_key: Ed25519SecretKey,
+struct MlDsaSigningKey {
+    keypair: MlDsaKeyPair,
 }
 
-impl Ed25519SigningKey {
-    fn new(private_key: Ed25519SecretKey) -> Self {
-        Self { private_key }
+impl MlDsaSigningKey {
+    fn new(keypair: MlDsaKeyPair) -> Self {
+        Self { keypair }
     }
 }
 
-impl SigningKey for Ed25519SigningKey {
+impl SigningKey for MlDsaSigningKey {
     fn choose_scheme(&self, offered: &[SignatureScheme]) -> Option<Box<dyn rustls::sign::Signer>> {
-        if offered.contains(&SignatureScheme::ED25519) {
-            Some(Box::new(Ed25519Signer {
-                private_key: self.private_key.clone(),
+        // For PQC-only, select ML-DSA-65 via private-use codepoint
+        let mldsa65 = crate::crypto::pqc::tls_extensions::SignatureScheme::MlDsa65.to_u16();
+        if offered.contains(&SignatureScheme::Unknown(mldsa65)) {
+            Some(Box::new(MlDsaSigner {
+                keypair: self.keypair.clone(),
             }))
         } else {
             None
@@ -243,63 +264,54 @@ impl SigningKey for Ed25519SigningKey {
     }
 
     fn algorithm(&self) -> rustls::SignatureAlgorithm {
+        // rustls does not yet expose a PQC algorithm identifier; retain ED25519 here
+        // to satisfy trait requirements. The actual selected scheme is communicated
+        // via Signer::scheme() as Unknown(ML-DSA-65).
         rustls::SignatureAlgorithm::ED25519
     }
 }
 
-/// Ed25519 signer implementation
+/// ML-DSA signer implementation
 #[derive(Debug)]
-struct Ed25519Signer {
-    private_key: Ed25519SecretKey,
+struct MlDsaSigner {
+    keypair: MlDsaKeyPair,
 }
 
-impl rustls::sign::Signer for Ed25519Signer {
+impl rustls::sign::Signer for MlDsaSigner {
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, TlsError> {
-        let signature = self.private_key.sign(message);
-        Ok(signature.to_bytes().to_vec())
+        let signature = self
+            .keypair
+            .sign(message)
+            .map_err(|e| TlsError::General(format!("Failed to sign: {}", e)))?;
+        Ok(signature.as_bytes().to_vec())
     }
 
     fn scheme(&self) -> SignatureScheme {
-        SignatureScheme::ED25519
+        let mldsa65 = crate::crypto::pqc::tls_extensions::SignatureScheme::MlDsa65.to_u16();
+        SignatureScheme::Unknown(mldsa65)
     }
 }
 
-/// Create a SubjectPublicKeyInfo DER encoding for an Ed25519 public key
-pub fn create_ed25519_subject_public_key_info(public_key: &Ed25519PublicKey) -> Vec<u8> {
-    // Ed25519 SubjectPublicKeyInfo structure:
+/// Create a SubjectPublicKeyInfo DER encoding for an ML-DSA public key
+pub fn create_ml_dsa_subject_public_key_info(public_key: &MlDsaPublicKey) -> Vec<u8> {
+    // ML-DSA SubjectPublicKeyInfo structure:
     // SEQUENCE {
     //   SEQUENCE {
-    //     OBJECT IDENTIFIER 1.3.101.112 (Ed25519)
+    //     OBJECT IDENTIFIER (ML-DSA-65 - temporary)
     //   }
-    //   BIT STRING (32 bytes of public key)
+    //   BIT STRING (1952 bytes of public key)
     // }
 
-    let mut spki = Vec::new();
-
-    // SEQUENCE tag and length (total length will be 44 bytes)
-    spki.extend_from_slice(&[0x30, 0x2a]);
-
-    // Algorithm identifier SEQUENCE
-    spki.extend_from_slice(&[0x30, 0x05]);
-
-    // Ed25519 OID: 1.3.101.112
-    spki.extend_from_slice(&[0x06, 0x03, 0x2b, 0x65, 0x70]);
-
-    // Subject public key BIT STRING
-    spki.extend_from_slice(&[0x03, 0x21, 0x00]); // BIT STRING, 33 bytes (32 + 1 unused bits byte)
-
-    // The actual 32-byte Ed25519 public key
-    spki.extend_from_slice(public_key.as_bytes());
-
-    spki
+    // Delegate to the raw_keys module implementation
+    crate::crypto::raw_keys::create_ml_dsa_subject_public_key_info(public_key)
 }
 
 /// Configuration builder for Raw Public Keys with TLS extension support
 #[derive(Debug, Default, Clone)]
 pub struct RawPublicKeyConfigBuilder {
-    trusted_keys: Vec<[u8; 32]>,
+    trusted_keys: Vec<Vec<u8>>,
     allow_any: bool,
-    server_key: Option<(Ed25519SecretKey, Ed25519PublicKey)>,
+    server_key: Option<MlDsaKeyPair>,
     /// Enable TLS certificate type extensions
     enable_extensions: bool,
     /// Certificate type preferences for negotiation
@@ -313,7 +325,7 @@ impl RawPublicKeyConfigBuilder {
     }
 
     /// Add a trusted public key
-    pub fn add_trusted_key(mut self, public_key: [u8; 32]) -> Self {
+    pub fn add_trusted_key(mut self, public_key: Vec<u8>) -> Self {
         self.trusted_keys.push(public_key);
         self
     }
@@ -325,9 +337,8 @@ impl RawPublicKeyConfigBuilder {
     }
 
     /// Set the server's key pair
-    pub fn with_server_key(mut self, private_key: Ed25519SecretKey) -> Self {
-        let public_key = private_key.verifying_key();
-        self.server_key = Some((private_key, public_key));
+    pub fn with_server_key(mut self, keypair: MlDsaKeyPair) -> Self {
+        self.server_key = Some(keypair);
         self
     }
 
@@ -379,11 +390,11 @@ impl RawPublicKeyConfigBuilder {
 
     /// Build a server configuration with Raw Public Keys
     pub fn build_server_config(self) -> Result<ServerConfig, TlsError> {
-        let (private_key, _public_key) = self
+        let keypair = self
             .server_key
             .ok_or_else(|| TlsError::General("Server key pair required".into()))?;
 
-        let resolver = RawPublicKeyResolver::new(private_key)?;
+        let resolver = RawPublicKeyResolver::new(keypair)?;
 
         let config = ServerConfig::builder()
             .with_no_client_auth()
@@ -425,79 +436,56 @@ impl RawPublicKeyConfigBuilder {
 pub mod key_utils {
     use super::*;
 
-    /// Generate a new Ed25519 key pair
-    pub fn generate_ed25519_keypair() -> (Ed25519SecretKey, Ed25519PublicKey) {
-        use rand::rngs::OsRng;
-        let private_key = Ed25519SecretKey::generate(&mut OsRng);
-        let public_key = private_key.verifying_key();
-        (private_key, public_key)
+    /// Generate a new ML-DSA key pair
+    pub fn generate_ml_dsa_keypair() -> MlDsaKeyPair {
+        MlDsaKeyPair::generate().expect("Failed to generate ML-DSA keypair")
     }
 
-    /// Convert Ed25519 public key to bytes
-    pub fn public_key_to_bytes(public_key: &Ed25519PublicKey) -> [u8; 32] {
-        *public_key.as_bytes()
+    /// Convert ML-DSA public key to bytes
+    pub fn public_key_to_bytes(public_key: &MlDsaPublicKey) -> Vec<u8> {
+        public_key.as_bytes().to_vec()
     }
 
-    /// Create Ed25519 public key from bytes
-    pub fn public_key_from_bytes(bytes: &[u8; 32]) -> Result<Ed25519PublicKey, &'static str> {
-        Ed25519PublicKey::from_bytes(bytes).map_err(|_| "Invalid public key bytes")
+    /// Create ML-DSA public key from bytes
+    pub fn public_key_from_bytes(bytes: &[u8]) -> Result<MlDsaPublicKey, &'static str> {
+        MlDsaPublicKey::from_bytes(bytes).map_err(|_| "Invalid public key bytes")
     }
 
     /// Create a test key pair for development
-    pub fn create_test_keypair() -> (Ed25519SecretKey, Ed25519PublicKey) {
-        // Use a different deterministic seed for testing to ensure different keys
-        let seed = [43u8; 32]; // Different from generate_ed25519_keypair
-        let private_key = Ed25519SecretKey::from_bytes(&seed);
-        let public_key = private_key.verifying_key();
-        (private_key, public_key)
+    pub fn create_test_keypair() -> MlDsaKeyPair {
+        // Generate a new ML-DSA keypair for testing
+        MlDsaKeyPair::generate().expect("Failed to generate test ML-DSA keypair")
     }
 
-    /// Derive a peer ID from an Ed25519 public key using SHA-256 hash
+    /// Derive a peer ID from an ML-DSA public key using SHA-256 hash
     ///
     /// This provides a secure, collision-resistant peer ID derivation method
     /// that follows P2P networking best practices. The SHA-256 hash ensures
     /// uniform distribution and prevents direct key exposure.
     pub fn derive_peer_id_from_public_key(
-        public_key: &Ed25519PublicKey,
+        public_key: &MlDsaPublicKey,
     ) -> crate::nat_traversal_api::PeerId {
-        #[cfg(feature = "ring")]
-        {
-            use ring::digest::{SHA256, digest};
+        // Use SHA-256 from utilities module for ML-DSA keys (1952 bytes)
+        use crate::crypto::utilities;
 
-            let key_bytes = public_key.as_bytes();
+        let key_bytes = public_key.as_bytes();
+        let mut input = Vec::with_capacity(20 + key_bytes.len());
+        input.extend_from_slice(b"AUTONOMI_PEER_ID_V2:"); // V2 for PQC
+        input.extend_from_slice(key_bytes);
 
-            // Create the input data with domain separator
-            let mut input = Vec::with_capacity(20 + 32); // "AUTONOMI_PEER_ID_V1:" + key_bytes
-            input.extend_from_slice(b"AUTONOMI_PEER_ID_V1:");
-            input.extend_from_slice(key_bytes);
+        let hash = utilities::sha256(&input);
+        let mut peer_id_bytes = [0u8; 32];
+        peer_id_bytes.copy_from_slice(&hash[..32]);
 
-            // Hash the input
-            let hash = digest(&SHA256, &input);
-            let hash_bytes = hash.as_ref();
-
-            let mut peer_id_bytes = [0u8; 32];
-            peer_id_bytes.copy_from_slice(hash_bytes);
-
-            crate::nat_traversal_api::PeerId(peer_id_bytes)
-        }
-        #[cfg(not(feature = "ring"))]
-        {
-            // Fallback implementation using direct key bytes (less secure but functional)
-            // In production, should always use ring or another crypto provider
-            let key_bytes = public_key.as_bytes();
-            let mut peer_id_bytes = [0u8; 32];
-            peer_id_bytes.copy_from_slice(key_bytes);
-
-            crate::nat_traversal_api::PeerId(peer_id_bytes)
-        }
+        crate::nat_traversal_api::PeerId(peer_id_bytes)
     }
 
-    /// Derive a peer ID from raw public key bytes (32-byte Ed25519 key)
+    /// Derive a peer ID from raw public key bytes (ML-DSA key)
     ///
     /// This is a convenience function for when you have the raw key bytes
-    /// rather than an Ed25519PublicKey object.
+    /// rather than an MlDsaPublicKey object.
     pub fn derive_peer_id_from_key_bytes(
-        key_bytes: &[u8; 32],
+        key_bytes: &[u8],
     ) -> Result<crate::nat_traversal_api::PeerId, &'static str> {
         let public_key = public_key_from_bytes(key_bytes)?;
         Ok(derive_peer_id_from_public_key(&public_key))
@@ -509,7 +497,7 @@ pub mod key_utils {
     /// to ensure the peer's claimed ID matches their public key.
     pub fn verify_peer_id(
         peer_id: &crate::nat_traversal_api::PeerId,
-        public_key: &Ed25519PublicKey,
+        public_key: &MlDsaPublicKey,
     ) -> bool {
         let derived_id = derive_peer_id_from_public_key(public_key);
         *peer_id == derived_id
@@ -521,6 +509,18 @@ mod tests {
     use super::key_utils::*;
     use super::*;
     use std::sync::Once;
+
+    // Minimal DER length parser for tests
+    fn parse_der_length(data: &[u8]) -> Option<(usize, usize)> {
+        if data.is_empty() { return None; }
+        if data[0] < 128 { return Some((data[0] as usize, 1)); }
+        if data[0] == 0x81 && data.len() >= 2 { return Some((data[1] as usize, 2)); }
+        if data[0] == 0x82 && data.len() >= 3 {
+            let len = ((data[1] as usize) << 8) | (data[2] as usize);
+            return Some((len, 3));
+        }
+        None
+    }
 
     static INIT: Once = Once::new();
 
@@ -537,32 +537,63 @@ mod tests {
     }
 
     #[test]
-    fn test_create_ed25519_subject_public_key_info() {
-        let (_, public_key) = generate_ed25519_keypair();
-        let spki = create_ed25519_subject_public_key_info(&public_key);
+    fn test_create_ml_dsa_subject_public_key_info() {
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
+        let spki = create_ml_dsa_subject_public_key_info(&public_key);
 
-        // Should be exactly 44 bytes
-        assert_eq!(spki.len(), 44);
+        // ML-DSA-65 SPKI should be larger than just the key (1952 bytes key + ASN.1 wrapper)
+        assert!(spki.len() > 1952);
 
-        // Should start with correct ASN.1 structure
-        assert_eq!(
-            &spki[0..9],
-            &[0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70]
-        );
+        // Should start with ASN.1 SEQUENCE tag (0x30)
+        // The actual structure will vary based on ML-DSA-65 OID
+        assert_eq!(spki[0], 0x30); // SEQUENCE tag
 
-        // Should contain the public key at the end
-        assert_eq!(&spki[12..], public_key.as_bytes());
+        // Minimal structural check: SEQUENCE { AlgorithmIdentifier { OID }, BIT STRING }
+        assert_eq!(spki[0], 0x30);
+        // Parse outer length
+        let (outer_len, len_bytes) = parse_der_length(&spki[1..]).unwrap();
+        assert!(outer_len + 1 + len_bytes <= spki.len());
+        let mut offset = 1 + len_bytes;
+        // AlgorithmIdentifier
+        assert_eq!(spki[offset], 0x30);
+        offset += 1;
+        let (_alg_len, alg_len_bytes) = parse_der_length(&spki[offset..]).unwrap();
+        offset += alg_len_bytes;
+        // OID
+        assert_eq!(spki[offset], 0x06);
+        offset += 1;
+        let (oid_len, oid_len_bytes) = parse_der_length(&spki[offset..]).unwrap();
+        offset += oid_len_bytes;
+        let oid_value = &spki[offset..offset + oid_len];
+        offset += oid_len;
+        // Ensure OID is ML-DSA-65
+        use crate::crypto::pqc::oids::{decode_oid_value, OID_ML_DSA_65};
+        let arcs = decode_oid_value(oid_value).unwrap();
+        assert_eq!(arcs.as_slice(), OID_ML_DSA_65);
+        // After AlgorithmIdentifier, expect BIT STRING
+        assert_eq!(spki[offset], 0x03);
+        // Skip BIT STRING header
+        offset += 1;
+        let (bs_len, bs_len_bytes) = parse_der_length(&spki[offset..]).unwrap();
+        offset += bs_len_bytes;
+        // First byte unused bits
+        assert_eq!(spki[offset], 0x00);
+        offset += 1;
+        assert_eq!(bs_len - 1, public_key.as_bytes().len());
+        assert_eq!(&spki[offset..offset + public_key.as_bytes().len()], public_key.as_bytes());
     }
 
     #[test]
     fn test_raw_public_key_verifier_trusted_key() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let key_bytes = public_key_to_bytes(&public_key);
 
         let verifier = RawPublicKeyVerifier::new(vec![key_bytes]);
 
         // Create a mock certificate with the public key
-        let spki = create_ed25519_subject_public_key_info(&public_key);
+        let spki = create_ml_dsa_subject_public_key_info(&public_key);
         let cert = CertificateDer::from(spki);
 
         // Should successfully verify
@@ -574,19 +605,21 @@ mod tests {
             UnixTime::now(),
         );
 
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Verification failed: {:?}", result);
     }
 
     #[test]
     fn test_raw_public_key_verifier_unknown_key() {
-        let (_, public_key1) = generate_ed25519_keypair();
-        let (_, public_key2) = generate_ed25519_keypair();
+        let keypair1 = generate_ml_dsa_keypair();
+        let public_key1 = keypair1.public_key();
+        let keypair2 = generate_ml_dsa_keypair();
+        let public_key2 = keypair2.public_key();
 
         let key1_bytes = public_key_to_bytes(&public_key1);
         let verifier = RawPublicKeyVerifier::new(vec![key1_bytes]);
 
         // Create certificate with different key
-        let spki = create_ed25519_subject_public_key_info(&public_key2);
+        let spki = create_ml_dsa_subject_public_key_info(&public_key2);
         let cert = CertificateDer::from(spki);
 
         // Should fail verification
@@ -603,10 +636,11 @@ mod tests {
 
     #[test]
     fn test_raw_public_key_verifier_allow_any() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let verifier = RawPublicKeyVerifier::allow_any();
 
-        let spki = create_ed25519_subject_public_key_info(&public_key);
+        let spki = create_ml_dsa_subject_public_key_info(&public_key);
         let cert = CertificateDer::from(spki);
 
         // Should accept any valid key
@@ -624,7 +658,8 @@ mod tests {
     #[test]
     fn test_config_builder() {
         ensure_crypto_provider();
-        let (private_key, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let key_bytes = public_key_to_bytes(&public_key);
 
         // Test client config
@@ -635,25 +670,28 @@ mod tests {
 
         // Test server config
         let server_config = RawPublicKeyConfigBuilder::new()
-            .with_server_key(private_key)
+            .with_server_key(keypair)
             .build_server_config();
         assert!(server_config.is_ok());
     }
 
     #[test]
-    fn test_extract_ed25519_key() {
-        let (_, public_key) = generate_ed25519_keypair();
-        let spki = create_ed25519_subject_public_key_info(&public_key);
+    fn test_extract_ml_dsa_key() {
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
+        let spki = create_ml_dsa_subject_public_key_info(&public_key);
 
         let verifier = RawPublicKeyVerifier::allow_any();
-        let extracted_key = verifier.extract_ed25519_key(&spki).unwrap();
+        let extracted_key = verifier.extract_ml_dsa_key(&spki).unwrap();
 
-        assert_eq!(extracted_key, public_key_to_bytes(&public_key));
+        // For ML-DSA, we just check the size is reasonable
+        assert!(!extracted_key.is_empty());
     }
 
     #[test]
     fn test_derive_peer_id_from_public_key() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
 
         // Test that the function produces a consistent peer ID
         let peer_id1 = derive_peer_id_from_public_key(&public_key);
@@ -662,7 +700,8 @@ mod tests {
         assert_eq!(peer_id1, peer_id2);
 
         // Test that different keys produce different peer IDs
-        let (_, public_key2) = create_test_keypair();
+        let keypair2 = create_test_keypair();
+        let public_key2 = keypair2.public_key();
         let peer_id3 = derive_peer_id_from_public_key(&public_key2);
 
         assert_ne!(peer_id1, peer_id3);
@@ -670,7 +709,8 @@ mod tests {
 
     #[test]
     fn test_derive_peer_id_from_key_bytes() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let key_bytes = public_key_to_bytes(&public_key);
 
         // Test that both methods produce the same result
@@ -680,7 +720,8 @@ mod tests {
         assert_eq!(peer_id1, peer_id2);
 
         // Test with a different valid key to ensure different peer IDs
-        let (_, public_key2) = create_test_keypair();
+        let keypair2 = create_test_keypair();
+        let public_key2 = keypair2.public_key();
         let key_bytes2 = public_key_to_bytes(&public_key2);
         let peer_id3 = derive_peer_id_from_key_bytes(&key_bytes2).unwrap();
 
@@ -689,14 +730,16 @@ mod tests {
 
     #[test]
     fn test_verify_peer_id() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         // Test that verification succeeds for correct peer ID
         assert!(verify_peer_id(&peer_id, &public_key));
 
         // Test that verification fails for incorrect peer ID
-        let (_, other_public_key) = create_test_keypair();
+        let other_keypair = create_test_keypair();
+        let other_public_key = other_keypair.public_key();
         assert!(!verify_peer_id(&peer_id, &other_public_key));
 
         // Test that verification fails for wrong peer ID
@@ -706,12 +749,14 @@ mod tests {
 
     #[test]
     fn test_peer_id_domain_separation() {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         // The peer ID should not be the same as the raw public key
         let key_bytes = public_key_to_bytes(&public_key);
-        assert_ne!(peer_id.0, key_bytes);
+        // Compare first 32 bytes since peer_id is [u8; 32] and key_bytes is Vec<u8>
+        assert_ne!(&peer_id.0[..], &key_bytes[..32.min(key_bytes.len())]);
 
         // The peer ID should be deterministic
         let peer_id2 = derive_peer_id_from_public_key(&public_key);

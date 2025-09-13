@@ -8,10 +8,10 @@
 //! - Side-channel attacks
 
 use ant_quic::{
+    PeerId,
     auth::{AuthConfig, AuthManager, AuthMessage},
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair, public_key_to_bytes,
-    },
+    crypto::raw_keys::{MlDsaPublicKey, derive_peer_id_from_public_key},
+    crypto::raw_public_keys::key_utils::generate_ml_dsa_keypair,
 };
 use futures_util::future;
 use std::{
@@ -25,6 +25,11 @@ use std::{
 use tokio::{sync::Semaphore, time::timeout};
 use tracing::info;
 
+// Helper function to convert ML-DSA public key to bytes
+fn public_key_to_bytes(public_key: &MlDsaPublicKey) -> Vec<u8> {
+    public_key.as_bytes().to_vec()
+}
+
 // ===== DoS Attack Tests =====
 
 #[tokio::test]
@@ -32,7 +37,8 @@ async fn test_auth_flooding_dos_protection() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test protection against authentication flooding
-    let (victim_secret, victim_public) = generate_ed25519_keypair();
+    let victim_keypair = generate_ml_dsa_keypair();
+    let victim_public = victim_keypair.public_key();
     let _victim_id = derive_peer_id_from_public_key(&victim_public);
 
     let config = AuthConfig {
@@ -41,14 +47,15 @@ async fn test_auth_flooding_dos_protection() {
         ..Default::default()
     };
 
-    let victim_auth = Arc::new(AuthManager::new(victim_secret, config));
+    let victim_auth = Arc::new(AuthManager::new(victim_keypair, config));
 
     // Attacker creates many fake identities
     let attacker_count = 1000;
     let mut attacker_ids = Vec::new();
 
     for _ in 0..attacker_count {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
         attacker_ids.push((peer_id, public_key));
     }
@@ -69,7 +76,7 @@ async fn test_auth_flooding_dos_protection() {
 
             // Send auth request
             let result = victim_auth_clone
-                .handle_auth_request(attacker_id, public_key_to_bytes(&attacker_key))
+                .handle_auth_request(PeerId(attacker_id), &public_key_to_bytes(&attacker_key))
                 .await;
 
             drop(_permit);
@@ -97,11 +104,12 @@ async fn test_auth_flooding_dos_protection() {
     );
 
     // Legitimate auth should still work
-    let (_legit_secret, legit_public) = generate_ed25519_keypair();
+    let legit_keypair = generate_ml_dsa_keypair();
+    let legit_public = legit_keypair.public_key();
     let legit_id = derive_peer_id_from_public_key(&legit_public);
 
     let legit_result = victim_auth
-        .handle_auth_request(legit_id, public_key_to_bytes(&legit_public))
+        .handle_auth_request(PeerId(legit_id), &public_key_to_bytes(&legit_public))
         .await;
 
     assert!(
@@ -115,14 +123,14 @@ async fn test_challenge_memory_exhaustion() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test protection against memory exhaustion via pending challenges
-    let (secret_key, _) = generate_ed25519_keypair();
+    let keypair = generate_ml_dsa_keypair();
 
     let config = AuthConfig {
         challenge_validity: Duration::from_secs(60), // Long validity
         ..Default::default()
     };
 
-    let auth = Arc::new(AuthManager::new(secret_key, config));
+    let auth = Arc::new(AuthManager::new(keypair, config));
 
     // Track memory usage indirectly via challenge count
     let challenge_count = Arc::new(AtomicU64::new(0));
@@ -134,11 +142,12 @@ async fn test_challenge_memory_exhaustion() {
         let count_clone = Arc::clone(&challenge_count);
 
         let task = tokio::spawn(async move {
-            let (_, public_key) = generate_ed25519_keypair();
+            let keypair = generate_ml_dsa_keypair();
+            let public_key = keypair.public_key();
             let peer_id = derive_peer_id_from_public_key(&public_key);
 
             let result = auth_clone
-                .handle_auth_request(peer_id, public_key_to_bytes(&public_key))
+                .handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&public_key))
                 .await;
 
             if result.is_ok() {
@@ -163,11 +172,12 @@ async fn test_challenge_memory_exhaustion() {
     auth.cleanup_expired_challenges().await;
 
     // System should still be functional
-    let (_, test_key) = generate_ed25519_keypair();
+    let test_keypair = generate_ml_dsa_keypair();
+    let test_key = test_keypair.public_key();
     let test_id = derive_peer_id_from_public_key(&test_key);
 
     let result = auth
-        .handle_auth_request(test_id, public_key_to_bytes(&test_key))
+        .handle_auth_request(PeerId(test_id), &public_key_to_bytes(&test_key))
         .await;
 
     assert!(result.is_ok(), "System should remain functional");
@@ -180,18 +190,19 @@ async fn test_weak_randomness_detection() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test that we use cryptographically secure randomness
-    let (secret_key, _) = generate_ed25519_keypair();
-    let auth = AuthManager::new(secret_key, AuthConfig::default());
+    let keypair = generate_ml_dsa_keypair();
+    let auth = AuthManager::new(keypair, AuthConfig::default());
 
     // Collect multiple challenges to check for patterns
     let mut nonces = HashSet::new();
 
     for _ in 0..1000 {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         let challenge = auth
-            .handle_auth_request(peer_id, public_key_to_bytes(&public_key))
+            .handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&public_key))
             .await
             .unwrap();
 
@@ -223,12 +234,13 @@ async fn test_signature_malleability() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test resistance to signature malleability attacks
-    let (alice_secret, alice_public) = generate_ed25519_keypair();
-    let (bob_secret, _) = generate_ed25519_keypair();
+    let alice_keypair = generate_ml_dsa_keypair();
+    let alice_public = alice_keypair.public_key();
+    let bob_keypair = generate_ml_dsa_keypair();
 
     let alice_id = derive_peer_id_from_public_key(&alice_public);
-    let alice_auth = AuthManager::new(alice_secret, AuthConfig::default());
-    let bob_auth = AuthManager::new(bob_secret, AuthConfig::default());
+    let alice_auth = AuthManager::new(alice_keypair, AuthConfig::default());
+    let bob_auth = AuthManager::new(bob_keypair, AuthConfig::default());
 
     // Create a valid challenge-response
     let auth_request = alice_auth.create_auth_request();
@@ -238,7 +250,7 @@ async fn test_signature_malleability() {
             public_key,
             ..
         } => bob_auth
-            .handle_auth_request(peer_id, public_key)
+            .handle_auth_request(peer_id, &public_key)
             .await
             .unwrap(),
         _ => panic!("Expected AuthRequest"),
@@ -287,8 +299,8 @@ async fn test_signature_malleability() {
             for (i, mal_sig) in malleation_attempts.iter().enumerate() {
                 let result = bob_auth
                     .verify_challenge_response(
-                        alice_id,
-                        public_key_to_bytes(&alice_public),
+                        PeerId(alice_id),
+                        &public_key_to_bytes(&alice_public),
                         nonce,
                         mal_sig,
                     )
@@ -311,18 +323,19 @@ async fn test_challenge_prediction_attack() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test that challenges cannot be predicted
-    let (secret_key, _) = generate_ed25519_keypair();
-    let auth = AuthManager::new(secret_key, AuthConfig::default());
+    let keypair = generate_ml_dsa_keypair();
+    let auth = AuthManager::new(keypair, AuthConfig::default());
 
     // Collect sequential challenges
     let mut challenges = Vec::new();
 
     for _i in 0..100 {
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         let challenge = auth
-            .handle_auth_request(peer_id, public_key_to_bytes(&public_key))
+            .handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&public_key))
             .await
             .unwrap();
 
@@ -365,17 +378,20 @@ async fn test_auth_state_confusion() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test resistance to state confusion attacks
-    let (alice_secret, alice_public) = generate_ed25519_keypair();
-    let (bob_secret, bob_public) = generate_ed25519_keypair();
-    let (charlie_secret, charlie_public) = generate_ed25519_keypair();
+    let alice_keypair = generate_ml_dsa_keypair();
+    let alice_public = alice_keypair.public_key();
+    let bob_keypair = generate_ml_dsa_keypair();
+    let bob_public = bob_keypair.public_key();
+    let charlie_keypair = generate_ml_dsa_keypair();
+    let charlie_public = charlie_keypair.public_key();
 
     let alice_id = derive_peer_id_from_public_key(&alice_public);
     let _bob_id = derive_peer_id_from_public_key(&bob_public);
     let _charlie_id = derive_peer_id_from_public_key(&charlie_public);
 
-    let alice_auth = AuthManager::new(alice_secret, AuthConfig::default());
-    let bob_auth = AuthManager::new(bob_secret, AuthConfig::default());
-    let charlie_auth = AuthManager::new(charlie_secret, AuthConfig::default());
+    let alice_auth = AuthManager::new(alice_keypair, AuthConfig::default());
+    let bob_auth = AuthManager::new(bob_keypair, AuthConfig::default());
+    let charlie_auth = AuthManager::new(charlie_keypair, AuthConfig::default());
 
     // Alice starts auth with Bob
     let alice_to_bob = alice_auth.create_auth_request();
@@ -385,7 +401,7 @@ async fn test_auth_state_confusion() {
             public_key,
             ..
         } => bob_auth
-            .handle_auth_request(peer_id, public_key)
+            .handle_auth_request(peer_id, &public_key)
             .await
             .unwrap(),
         _ => panic!("Expected AuthRequest"),
@@ -399,7 +415,7 @@ async fn test_auth_state_confusion() {
             public_key,
             ..
         } => bob_auth
-            .handle_auth_request(peer_id, public_key)
+            .handle_auth_request(peer_id, &public_key)
             .await
             .unwrap(),
         _ => panic!("Expected AuthRequest"),
@@ -423,8 +439,8 @@ async fn test_auth_state_confusion() {
         } => {
             let result = bob_auth
                 .verify_challenge_response(
-                    alice_id,
-                    public_key_to_bytes(&alice_public),
+                    PeerId(alice_id),
+                    &public_key_to_bytes(&alice_public),
                     nonce,
                     &signature,
                 )
@@ -443,15 +459,17 @@ async fn test_timing_side_channel_auth_request() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test timing consistency for auth request handling
-    let (secret_key, _) = generate_ed25519_keypair();
-    let auth = AuthManager::new(secret_key, AuthConfig::default());
+    let keypair = generate_ml_dsa_keypair();
+    let auth = AuthManager::new(keypair, AuthConfig::default());
 
     // Test with valid vs invalid peer IDs
-    let (_valid_secret, valid_public) = generate_ed25519_keypair();
+    let valid_keypair = generate_ml_dsa_keypair();
+    let valid_public = valid_keypair.public_key();
     let valid_id = derive_peer_id_from_public_key(&valid_public);
 
     let invalid_id = valid_id; // Same ID
-    let (_, mismatched_public) = generate_ed25519_keypair(); // Different key
+    let mismatched_keypair = generate_ml_dsa_keypair(); // Different key
+    let mismatched_public = mismatched_keypair.public_key();
 
     let mut valid_times = Vec::new();
     let mut invalid_times = Vec::new();
@@ -459,7 +477,7 @@ async fn test_timing_side_channel_auth_request() {
     // Warm up
     for _ in 0..10 {
         let _ = auth
-            .handle_auth_request(valid_id, public_key_to_bytes(&valid_public))
+            .handle_auth_request(PeerId(valid_id), &public_key_to_bytes(&valid_public))
             .await;
     }
 
@@ -468,14 +486,14 @@ async fn test_timing_side_channel_auth_request() {
         // Time valid request
         let start = Instant::now();
         let _ = auth
-            .handle_auth_request(valid_id, public_key_to_bytes(&valid_public))
+            .handle_auth_request(PeerId(valid_id), &public_key_to_bytes(&valid_public))
             .await;
         valid_times.push(start.elapsed());
 
         // Time invalid request (mismatched peer ID)
         let start = Instant::now();
         let _ = auth
-            .handle_auth_request(invalid_id, public_key_to_bytes(&mismatched_public))
+            .handle_auth_request(PeerId(invalid_id), &public_key_to_bytes(&mismatched_public))
             .await;
         invalid_times.push(start.elapsed());
     }
@@ -501,16 +519,17 @@ async fn test_cache_timing_attacks() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test for cache-based timing attacks
-    let (secret_key, _) = generate_ed25519_keypair();
-    let auth = Arc::new(AuthManager::new(secret_key, AuthConfig::default()));
+    let keypair = generate_ml_dsa_keypair();
+    let auth = Arc::new(AuthManager::new(keypair, AuthConfig::default()));
 
     // First, authenticate a peer to cache it
-    let (cached_secret, cached_public) = generate_ed25519_keypair();
+    let cached_keypair = generate_ml_dsa_keypair();
+    let cached_public = cached_keypair.public_key();
     let cached_id = derive_peer_id_from_public_key(&cached_public);
 
     // Complete full auth flow to cache the peer
     let request = AuthMessage::AuthRequest {
-        peer_id: cached_id,
+        peer_id: PeerId(cached_id),
         public_key: public_key_to_bytes(&cached_public),
         timestamp: SystemTime::now(),
     };
@@ -520,13 +539,16 @@ async fn test_cache_timing_attacks() {
             peer_id,
             public_key,
             ..
-        } => auth.handle_auth_request(peer_id, public_key).await.unwrap(),
+        } => auth
+            .handle_auth_request(peer_id, &public_key)
+            .await
+            .unwrap(),
         _ => panic!("Expected AuthRequest"),
     };
 
     // Complete authentication
     if let AuthMessage::Challenge { nonce, .. } = challenge {
-        let cached_auth = AuthManager::new(cached_secret, AuthConfig::default());
+        let cached_auth = AuthManager::new(cached_keypair, AuthConfig::default());
         let response = cached_auth.create_challenge_response(nonce).unwrap();
 
         if let AuthMessage::ChallengeResponse {
@@ -535,8 +557,8 @@ async fn test_cache_timing_attacks() {
         {
             let _ = auth
                 .verify_challenge_response(
-                    cached_id,
-                    public_key_to_bytes(&cached_public),
+                    PeerId(cached_id),
+                    &public_key_to_bytes(&cached_public),
                     nonce,
                     &signature,
                 )
@@ -551,16 +573,17 @@ async fn test_cache_timing_attacks() {
     for _ in 0..100 {
         // Check cached peer
         let start = Instant::now();
-        let is_auth = auth.is_authenticated(&cached_id).await;
+        let is_auth = auth.is_authenticated(&PeerId(cached_id)).await;
         cached_times.push(start.elapsed());
         assert!(is_auth);
 
         // Check uncached peer
-        let (_, uncached_public) = generate_ed25519_keypair();
+        let uncached_keypair = generate_ml_dsa_keypair();
+        let uncached_public = uncached_keypair.public_key();
         let uncached_id = derive_peer_id_from_public_key(&uncached_public);
 
         let start = Instant::now();
-        let is_auth = auth.is_authenticated(&uncached_id).await;
+        let is_auth = auth.is_authenticated(&PeerId(uncached_id)).await;
         uncached_times.push(start.elapsed());
         assert!(!is_auth);
     }
@@ -600,14 +623,14 @@ async fn test_connection_slot_exhaustion() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test protection against connection slot exhaustion
-    let (victim_secret, _) = generate_ed25519_keypair();
+    let victim_keypair = generate_ml_dsa_keypair();
 
     let config = AuthConfig {
         max_auth_attempts: 3,
         ..Default::default()
     };
 
-    let victim_auth = Arc::new(AuthManager::new(victim_secret, config));
+    let victim_auth = Arc::new(AuthManager::new(victim_keypair, config));
 
     // Track resource usage
     let active_attempts = Arc::new(AtomicU64::new(0));
@@ -623,12 +646,13 @@ async fn test_connection_slot_exhaustion() {
         let task = tokio::spawn(async move {
             active_clone.fetch_add(1, Ordering::Relaxed);
 
-            let (_, public_key) = generate_ed25519_keypair();
+            let keypair = generate_ml_dsa_keypair();
+            let public_key = keypair.public_key();
             let peer_id = derive_peer_id_from_public_key(&public_key);
 
             let result = timeout(
                 Duration::from_secs(1),
-                auth_clone.handle_auth_request(peer_id, public_key_to_bytes(&public_key)),
+                auth_clone.handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&public_key)),
             )
             .await;
 
@@ -653,11 +677,12 @@ async fn test_connection_slot_exhaustion() {
     info!("System handled 1000 concurrent auth attempts without crashing");
 
     // Verify the system is still functional after the load test
-    let (_test_secret, test_public) = generate_ed25519_keypair();
+    let test_keypair = generate_ml_dsa_keypair();
+    let test_public = test_keypair.public_key();
     let test_id = derive_peer_id_from_public_key(&test_public);
 
     let result = victim_auth
-        .handle_auth_request(test_id, public_key_to_bytes(&test_public))
+        .handle_auth_request(PeerId(test_id), &public_key_to_bytes(&test_public))
         .await;
 
     assert!(
@@ -675,16 +700,17 @@ async fn test_memory_pressure_during_auth() {
 
     // Create many auth managers with pending challenges
     for _i in 0..100 {
-        let (secret_key, _) = generate_ed25519_keypair();
-        let auth = Arc::new(AuthManager::new(secret_key, AuthConfig::default()));
+        let keypair = generate_ml_dsa_keypair();
+        let auth = Arc::new(AuthManager::new(keypair, AuthConfig::default()));
 
         // Create pending challenges
         for _ in 0..100 {
-            let (_, public_key) = generate_ed25519_keypair();
+            let keypair = generate_ml_dsa_keypair();
+            let public_key = keypair.public_key();
             let peer_id = derive_peer_id_from_public_key(&public_key);
 
             let _ = auth
-                .handle_auth_request(peer_id, public_key_to_bytes(&public_key))
+                .handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&public_key))
                 .await;
         }
 
@@ -699,12 +725,13 @@ async fn test_memory_pressure_during_auth() {
     }
 
     // Verify system is still functional
-    let (test_secret, test_public) = generate_ed25519_keypair();
+    let test_keypair = generate_ml_dsa_keypair();
+    let test_public = test_keypair.public_key();
     let test_id = derive_peer_id_from_public_key(&test_public);
-    let test_auth = AuthManager::new(test_secret, AuthConfig::default());
+    let test_auth = AuthManager::new(test_keypair, AuthConfig::default());
 
     let result = test_auth
-        .handle_auth_request(test_id, public_key_to_bytes(&test_public))
+        .handle_auth_request(PeerId(test_id), &public_key_to_bytes(&test_public))
         .await;
 
     assert!(
@@ -725,10 +752,11 @@ async fn test_race_condition_in_auth_state() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Test for race conditions in authentication state updates
-    let (secret_key, _) = generate_ed25519_keypair();
-    let auth = Arc::new(AuthManager::new(secret_key, AuthConfig::default()));
+    let keypair = generate_ml_dsa_keypair();
+    let auth = Arc::new(AuthManager::new(keypair, AuthConfig::default()));
 
-    let (_peer_secret, peer_public) = generate_ed25519_keypair();
+    let peer_keypair = generate_ml_dsa_keypair();
+    let peer_public = peer_keypair.public_key();
     let peer_id = derive_peer_id_from_public_key(&peer_public);
 
     // Create multiple tasks that try to authenticate the same peer simultaneously
@@ -738,6 +766,7 @@ async fn test_race_condition_in_auth_state() {
     for i in 0..10 {
         let auth_clone = Arc::clone(&auth);
         let barrier_clone = Arc::clone(&start_barrier);
+        let peer_public_clone = peer_public.clone();
 
         let task = tokio::spawn(async move {
             // Synchronize start
@@ -745,7 +774,7 @@ async fn test_race_condition_in_auth_state() {
 
             // Try to handle auth request
             let result = auth_clone
-                .handle_auth_request(peer_id, public_key_to_bytes(&peer_public))
+                .handle_auth_request(PeerId(peer_id), &public_key_to_bytes(&peer_public_clone))
                 .await;
 
             (i, result)
@@ -771,8 +800,8 @@ async fn test_race_condition_in_auth_state() {
     assert!(successful >= 1, "At least one auth attempt should succeed");
 
     // No data corruption - peer should be in consistent state
-    let is_auth = auth.is_authenticated(&peer_id).await;
-    let auth_peer = auth.get_authenticated_peer(&peer_id).await;
+    let is_auth = auth.is_authenticated(&PeerId(peer_id)).await;
+    let auth_peer = auth.get_authenticated_peer(&PeerId(peer_id)).await;
 
     // Either fully authenticated or not at all
     assert_eq!(

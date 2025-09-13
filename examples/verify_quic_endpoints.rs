@@ -3,7 +3,6 @@
 /// This example verifies which public QUIC endpoints are accessible
 /// and documents their capabilities.
 use ant_quic::{ClientConfig, EndpointConfig, VarInt, high_level::Endpoint};
-#[cfg(not(feature = "platform-verifier"))]
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -94,10 +93,6 @@ async fn test_endpoint(
     let server_name = endpoint_str.split(':').next().unwrap_or(endpoint_str);
 
     // Create client config
-    #[cfg(feature = "platform-verifier")]
-    let client_config = ClientConfig::try_with_platform_verifier()?;
-
-    #[cfg(not(feature = "platform-verifier"))]
     let client_config = {
         use ant_quic::crypto::rustls::QuicClientConfig;
 
@@ -107,7 +102,7 @@ async fn test_endpoint(
         let certs_result = rustls_native_certs::load_native_certs();
         for cert in certs_result.certs {
             roots
-                .add(rustls::pki_types::CertificateDer::from(cert))
+                .add(cert)
                 .ok();
         }
         if !certs_result.errors.is_empty() {

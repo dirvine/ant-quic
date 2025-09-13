@@ -201,7 +201,7 @@ pub use high_level::{
 
 // Re-export crypto utilities for peer ID management
 pub use crypto::raw_public_keys::key_utils::{
-    derive_peer_id_from_key_bytes, derive_peer_id_from_public_key, generate_ed25519_keypair,
+    derive_peer_id_from_key_bytes, derive_peer_id_from_public_key, generate_ml_dsa_keypair,
     public_key_from_bytes, public_key_to_bytes, verify_peer_id,
 };
 
@@ -376,7 +376,15 @@ impl coding::Codec for StreamId {
         VarInt::decode(buf).map(|x| Self(x.into_inner()))
     }
     fn encode<B: bytes::BufMut>(&self, buf: &mut B) {
-        VarInt::from_u64(self.0).unwrap().encode(buf);
+        match VarInt::from_u64(self.0) {
+            Ok(v) => v.encode(buf),
+            Err(_) => {
+                // StreamId outside VarInt range indicates a logic error upstream; avoid panic.
+                // Encode zero as a safe fallback and log if tracing is available.
+                // In debug builds we could log here, but avoid pulling logging into this hot path.
+                VarInt::from_u64(0).expect("0 fits VarInt").encode(buf)
+            }
+        }
     }
 }
 
@@ -411,7 +419,8 @@ pub(crate) use web_time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) const LOC_CID_COUNT: u64 = 8;
 pub(crate) const RESET_TOKEN_SIZE: usize = 16;
 pub(crate) const MAX_CID_SIZE: usize = 20;
-pub(crate) const MIN_INITIAL_SIZE: u16 = 1200;
+// Increased from 1200 to 2048 for PQC support (ML-KEM/ML-DSA require larger packets)
+pub(crate) const MIN_INITIAL_SIZE: u16 = 2048;
 /// <https://www.rfc-editor.org/rfc/rfc9000.html#name-datagram-size>
 pub(crate) const INITIAL_MTU: u16 = 1200;
 pub(crate) const MAX_UDP_PAYLOAD: u16 = 65527;
@@ -427,10 +436,7 @@ pub use config::{
 };
 
 // Post-Quantum Cryptography (PQC) re-exports - always available
-pub use crypto::pqc::{
-    HybridKem, HybridPreference, HybridSignature, MlDsa65, MlKem768, PqcConfig, PqcConfigBuilder,
-    PqcError, PqcMode, PqcResult,
-};
+pub use crypto::pqc::{MlDsa65, MlKem768, PqcConfig, PqcConfigBuilder, PqcError, PqcResult};
 pub(crate) use frame::Frame;
 pub(crate) use token::{NoneTokenLog, ResetToken, TokenLog, TokenStore};
 pub(crate) use token_memory_cache::TokenMemoryCache;

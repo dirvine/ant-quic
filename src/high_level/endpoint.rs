@@ -19,12 +19,8 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-#[cfg(all(not(wasm_browser), any(feature = "aws-lc-rs", feature = "ring")))]
-use super::runtime::default_runtime;
-use super::{
-    runtime::{AsyncUdpSocket, Runtime},
-    udp_transmit,
-};
+// Import runtime traits
+use super::{AsyncUdpSocket, Runtime, default_runtime, udp_transmit};
 use crate::Instant;
 use crate::{
     ClientConfig, ConnectError, ConnectionError, ConnectionHandle, DatagramEvent, EndpointEvent,
@@ -121,7 +117,10 @@ impl Endpoint {
     /// IPv6 address on Windows will not by default be able to communicate with IPv4
     /// addresses. Portable applications should bind an address that matches the family they wish to
     /// communicate within.
-    #[cfg(all(not(wasm_browser), any(feature = "aws-lc-rs", feature = "ring")))] // `EndpointConfig::default()` is only available with these
+    #[cfg(all(
+        not(wasm_browser),
+        any(feature = "rustls-aws-lc-rs", feature = "rustls-ring")
+    ))] // `EndpointConfig::default()` is only available with these
     pub fn server(config: ServerConfig, addr: SocketAddr) -> io::Result<Self> {
         let socket = std::net::UdpSocket::bind(addr)?;
         let runtime =

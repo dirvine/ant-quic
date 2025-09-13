@@ -1,6 +1,6 @@
 //! Tests for QUIC packet handling with PQC support
 
-#[cfg(all(test, feature = "pqc"))]
+#[cfg(test)]
 mod pqc_packet_tests {
     // Removed unused imports - they will be added back when functionality is implemented
 
@@ -442,13 +442,5 @@ mod pqc_packet_tests {
                 hybrid_ed25519_ml_dsa: data[3] != 0,
             })
         }
-    }
-}
-
-#[cfg(not(all(test, feature = "pqc")))]
-mod pqc_packet_tests {
-    #[test]
-    fn test_pqc_feature_required() {
-        println!("PQC packet handling tests require 'pqc' feature");
     }
 }

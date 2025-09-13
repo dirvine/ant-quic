@@ -13,7 +13,9 @@
 #[cfg(test)]
 mod tests {
     use super::super::{
-        raw_public_keys::{RawPublicKeyConfigBuilder, key_utils::*},
+        raw_keys::{MlDsaKeyPair, public_key_to_bytes},
+        raw_public_keys::RawPublicKeyConfigBuilder,
+        raw_public_keys::key_utils::generate_ml_dsa_keypair,
         tls_extension_simulation::create_connection_id,
         tls_extensions::{CertificateType, CertificateTypePreferences},
     };
@@ -36,7 +38,8 @@ mod tests {
     #[test]
     fn test_rfc7250_client_config_creation() {
         ensure_crypto_provider();
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let key_bytes = public_key_to_bytes(&public_key);
 
         let config_builder = RawPublicKeyConfigBuilder::new()
@@ -52,7 +55,8 @@ mod tests {
     #[test]
     fn test_rfc7250_server_config_creation() {
         ensure_crypto_provider();
-        let (private_key, _) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let private_key = keypair;
 
         let config_builder = RawPublicKeyConfigBuilder::new()
             .with_server_key(private_key)
@@ -67,7 +71,9 @@ mod tests {
     #[test]
     fn test_simulated_negotiation_flow() {
         ensure_crypto_provider();
-        let (server_private_key, server_public_key) = generate_ed25519_keypair();
+        let server_keypair = generate_ml_dsa_keypair();
+        let server_private_key = server_keypair.clone();
+        let server_public_key = server_keypair.public_key();
         let server_key_bytes = public_key_to_bytes(&server_public_key);
 
         // Client configuration
@@ -113,7 +119,9 @@ mod tests {
     #[test]
     fn test_mixed_preferences_negotiation() {
         ensure_crypto_provider();
-        let (server_private_key, server_public_key) = generate_ed25519_keypair();
+        let server_keypair = generate_ml_dsa_keypair();
+        let server_private_key = server_keypair.clone();
+        let server_public_key = server_keypair.public_key();
         let server_key_bytes = public_key_to_bytes(&server_public_key);
 
         // Client prefers RPK but supports X.509
@@ -154,7 +162,8 @@ mod tests {
     #[test]
     fn test_extension_context_cleanup() {
         ensure_crypto_provider();
-        let (_, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let key_bytes = public_key_to_bytes(&public_key);
 
         let client_config = RawPublicKeyConfigBuilder::new()

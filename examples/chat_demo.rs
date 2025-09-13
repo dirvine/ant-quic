@@ -6,9 +6,7 @@
 use ant_quic::{
     auth::AuthConfig,
     chat::{ChatMessage, PeerInfo},
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ed25519_keypair,
-    },
+    crypto::raw_public_keys::key_utils::{derive_peer_id_from_public_key, generate_ml_dsa_keypair},
     nat_traversal_api::{EndpointRole, PeerId},
     quic_node::{QuicNodeConfig, QuicP2PNode},
 };
@@ -31,7 +29,8 @@ impl ChatNode {
         nickname: String,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Generate identity
-        let (_private_key, public_key) = generate_ed25519_keypair();
+        let keypair = generate_ml_dsa_keypair();
+        let public_key = keypair.public_key();
         let peer_id = derive_peer_id_from_public_key(&public_key);
 
         // Create QUIC node

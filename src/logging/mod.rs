@@ -53,7 +53,10 @@ pub fn init_logging(config: LoggingConfig) -> Result<(), LoggingError> {
         .map_err(|_| LoggingError::AlreadyInitialized)?;
 
     // Initialize tracing subscriber
-    let env_filter = EnvFilter::from_default_env().add_directive("ant_quic=debug".parse().unwrap());
+    let env_filter = match "ant_quic=debug".parse() {
+        Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
+        Err(_) => EnvFilter::from_default_env(),
+    };
 
     if logger.use_json() {
         let fmt_layer = tracing_subscriber::fmt::layer()
@@ -87,7 +90,12 @@ pub fn logger() -> Arc<Logger> {
     LOGGER.get().cloned().unwrap_or_else(|| {
         // Create default logger if not initialized
         let config = LoggingConfig::default();
-        let logger = Arc::new(Logger::new(config).expect("Failed to create default logger"));
+        let logger = Arc::new(Logger::new(config).unwrap_or_else(|_| Logger {
+            config: LoggingConfig::default(),
+            metrics_collector: Arc::new(MetricsCollector::new()),
+            event_buffer: Arc::new(Mutex::new(Vec::new())),
+            rate_limiter: Arc::new(RateLimiter::new(1000, Duration::from_secs(1))),
+        }));
         let _ = LOGGER.set(logger.clone());
         logger
     })

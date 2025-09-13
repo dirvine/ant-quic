@@ -71,17 +71,16 @@ impl Incoming {
             Some(state) => state,
             None => {
                 error!("Incoming connection state already consumed");
-                // This is a programming error - the connection has already been consumed
-                // In a production system, this should be handled more gracefully
-                // For now, we'll panic since this indicates a bug in the calling code
-                panic!("Incoming connection state already consumed - this is a programming error");
+                return Err(RetryError(Box::new(Incoming(None))));
             }
         };
-        state.endpoint.retry(state.inner).map_err(|_| {
-            // Since we can't create a proper RetryError without an Incoming,
-            // we'll panic as this indicates a serious internal error
-            panic!("Retry failed due to internal error");
-        })
+        state
+            .endpoint
+            .retry(state.inner)
+            .map_err(|e| {
+                error!("Retry failed: {}", e);
+                RetryError(Box::new(Incoming(None)))
+            })
     }
 
     /// Ignore this incoming connection attempt, not sending any packet in response
@@ -103,11 +102,7 @@ impl Incoming {
         self.0
             .as_ref()
             .map(|state| state.inner.remote_address())
-            .unwrap_or_else(|| {
-                "0.0.0.0:0".parse().unwrap_or_else(|_| {
-                    panic!("Failed to parse fallback address");
-                })
-            })
+            .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 0)))
     }
 
     /// Whether the socket address that is initiating this connection has been validated

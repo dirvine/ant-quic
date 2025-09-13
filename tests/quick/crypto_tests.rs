@@ -15,8 +15,8 @@ fn test_basic_crypto_operations() {
 fn test_key_generation_speed() {
     super::utils::assert_duration(Duration::from_millis(200), || {
         // Test that key generation is reasonably fast
-        use ed25519_dalek::SigningKey;
-        let _signing_key = SigningKey::generate(&mut rand::thread_rng());
+        use ant_quic::crypto::raw_public_keys::key_utils::generate_ml_dsa_keypair;
+        let _keypair = generate_ml_dsa_keypair();
         // Test completed - key generated successfully
     });
 }
