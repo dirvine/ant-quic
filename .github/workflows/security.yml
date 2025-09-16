@@ -177,7 +177,7 @@ jobs:
   scorecard:
     name: Security Scorecard
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     permissions:
       security-events: write
       id-token: write
