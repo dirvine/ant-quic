@@ -66,8 +66,8 @@ These platforms may compile but are not regularly tested.
 | WASM | ❌ | Not supported |
 
 ### Async Runtime Support
-| Platform | Tokio | async-std |
-|----------|-------|-----------|
+| Platform | Tokio | Smol |
+|----------|-------|------|
 | Linux | ✅ | ✅ |
 | macOS | ✅ | ✅ |
 | Windows | ✅ | ✅ |

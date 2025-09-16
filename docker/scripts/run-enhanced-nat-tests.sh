@@ -41,6 +41,8 @@ init_test_env() {
     
     # Create directories
     mkdir -p "$LOG_DIR" "$RESULTS_DIR" "$RESULTS_DIR/metrics" "$RESULTS_DIR/pcaps" ./shared
+    chmod 0777 ./shared 2>/dev/null || true
+    find ./shared -type f -name 'ant-quic-peer-*.addr' -delete 2>/dev/null || true
     
     # Check Docker Compose command
     if docker compose version &> /dev/null; then

@@ -17,34 +17,6 @@ use std::{
 use super::{AsyncTimer, AsyncUdpSocket, Runtime, UdpPollHelper, UdpPoller};
 use crate::Instant;
 
-/// Runtime implementation for async-io based runtimes (async-std, smol)
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct AsyncIoRuntime;
-
-#[cfg(feature = "runtime-async-std")]
-/// Runtime for async-std
-#[derive(Debug)]
-pub struct AsyncStdRuntime;
-
-#[cfg(feature = "runtime-async-std")]
-impl Runtime for AsyncStdRuntime {
-    fn new_timer(&self, i: Instant) -> Pin<Box<dyn AsyncTimer>> {
-        Box::pin(AsyncIoTimer(async_io::Timer::at(i.into())))
-    }
-
-    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send>>) {
-        async_std::task::spawn(future);
-    }
-
-    fn wrap_udp_socket(&self, t: std::net::UdpSocket) -> io::Result<Arc<dyn AsyncUdpSocket>> {
-        Ok(Arc::new(UdpSocket {
-            inner: async_io::Async::new(t)?,
-            may_fragment: true, // Default to true for now
-        }))
-    }
-}
-
 #[cfg(feature = "smol")]
 /// Runtime for smol
 #[derive(Debug)]
