@@ -657,16 +657,17 @@ main() {
                 info "Running IPv6 support tests..."
                 # Reuse connectivity and discovery but emphasize IPv6 paths
                 # Basic IPv6 pings
-               for i in {1..3}; do
-                   run_test "ipv6_ping_client${i}" \
+                for i in {1..3}; do
+                    run_test "ipv6_ping_client${i}" \
                         "docker exec $(get_client_container \"client${i}\") ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
-               done
-               # IPv6-only client
-               run_test "ipv6_only_ping_client5" \
+                done
+                # IPv6-only client
+                run_test "ipv6_only_ping_client5" \
                     "docker exec $(get_client_container \"client5\") ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
                 # Address discovery on all clients
                 test_address_discovery ;;
             test_stress|test_network_stress)
+                start_chat_clients
                 test_network_stress ;;
             test_pqc|test_pqc_scenarios)
                 test_pqc_scenarios ;;
