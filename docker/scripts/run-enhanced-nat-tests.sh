@@ -34,11 +34,19 @@ CLIENT_CONTAINERS=()
 get_client_container() {
     local service="$1"
     local idx="${service#client}"
-    if [[ "$idx" =~ ^[0-9]+$ ]] && [ -n "${CLIENT_CONTAINERS[$idx]-}" ]; then
-        echo "${CLIENT_CONTAINERS[$idx]}"
-    else
-        echo "ant-quic-${service}"
+    if [[ "$idx" =~ ^[0-9]+$ ]]; then
+        if [ -z "${CLIENT_CONTAINERS[$idx]-}" ]; then
+            mapfile -t _temp_names < <(docker ps -a --filter "label=com.docker.compose.service=client${idx}" --format '{{.Names}}' 2>/dev/null || true)
+            if [ "${#_temp_names[@]}" -gt 0 ]; then
+                CLIENT_CONTAINERS[$idx]="${_temp_names[0]}"
+            fi
+        fi
+        if [ -n "${CLIENT_CONTAINERS[$idx]-}" ]; then
+            echo "${CLIENT_CONTAINERS[$idx]}"
+            return
+        fi
     fi
+    echo "ant-quic-${service}"
 }
 
 resolve_client_containers() {
