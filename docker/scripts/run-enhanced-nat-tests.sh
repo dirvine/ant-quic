@@ -43,7 +43,7 @@ get_client_container() {
 
 resolve_client_containers() {
     for idx in 1 2 3 4 5; do
-        mapfile -t _client_names < <($COMPOSE_CMD -f "$COMPOSE_FILE" ps --filter "service=client${idx}" --format '{{.Name}}\t{{.State}}' 2>/dev/null || true)
+        mapfile -t _client_names < <(docker ps -a --filter "label=com.docker.compose.service=client${idx}" --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true)
         if [ "${#_client_names[@]}" -eq 0 ]; then
             warn "No containers reported for client${idx}; falling back to ant-quic-client${idx}"
             CLIENT_CONTAINERS[$idx]="ant-quic-client${idx}"
@@ -58,7 +58,7 @@ resolve_client_containers() {
             if [[ -z "$first_name" ]]; then
                 first_name="$name"
             fi
-            if [[ "$state" != running* ]]; then
+            if [[ "$state" != Up* ]]; then
                 all_running=false
                 error "✗ ${name} is not running (state=$state)"
             fi
