@@ -51,10 +51,10 @@ jobs:
           
           
           # macOS variants
-          - os: macos-12
+          - os: macos-15
             rust: stable
-            target: x86_64-apple-darwin
-            name: "macOS 12 (Intel)"
+            target: aarch64-apple-darwin
+            name: "macOS 15 (Apple Silicon)"
           - os: macos-13
             rust: stable
             target: x86_64-apple-darwin

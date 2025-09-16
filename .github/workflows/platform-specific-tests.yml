@@ -145,7 +145,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-12
+          - os: macos-15
             rust: stable
           - os: macos-13
             rust: stable

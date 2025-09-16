@@ -220,7 +220,6 @@ jobs:
           echo "Target: ${{ matrix.target }}" >> test-results/platform-report-${{ matrix.target }}-${{ matrix.rust }}.txt
           echo "Rust: ${{ matrix.rust }}" >> test-results/platform-report-${{ matrix.target }}-${{ matrix.rust }}.txt
           echo "Status: ${{ job.status }}" >> test-results/platform-report-${{ matrix.target }}-${{ matrix.rust }}.txt
-          echo "Duration: ${{ github.run_duration }}" >> test-results/platform-report-${{ matrix.target }}-${{ matrix.rust }}.txt
 
       - name: Upload test results
         if: always()

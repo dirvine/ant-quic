@@ -178,7 +178,51 @@ jobs:
     needs: [test, integration-tests, doc-tests, feature-combinations, wasm-check, coverage]
     if: always()
     runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.evaluate.outputs.passed }}
     steps:
+      - name: Evaluate results
+        id: evaluate
+        run: |
+          declare -a names=(
+            "test"
+            "integration-tests"
+            "doc-tests"
+            "feature-combinations"
+            "wasm-check"
+            "coverage"
+          )
+
+          declare -a results=(
+            "${{ needs.test.result }}"
+            "${{ needs.integration-tests.result }}"
+            "${{ needs.doc-tests.result }}"
+            "${{ needs.feature-combinations.result }}"
+            "${{ needs.wasm-check.result }}"
+            "${{ needs.coverage.result }}"
+          )
+
+          passed=true
+          for i in "${!names[@]}"; do
+            name=${names[$i]}
+            result=${results[$i]}
+            echo "${name}: ${result}"
+            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              passed=false
+            fi
+          done
+
+          if [[ "${passed}" == true ]]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "${passed}" != true ]]; then
+            echo "One or more standard test jobs failed" >&2
+            exit 1
+          fi
+
       - name: Summary
         run: |
           echo "### Standard Tests Summary" >> $GITHUB_STEP_SUMMARY

@@ -26,7 +26,7 @@ jobs:
         components: llvm-tools-preview
         
     - name: Cache cargo dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -99,7 +99,7 @@ jobs:
         echo "{\"schemaVersion\": 1, \"label\": \"coverage\", \"message\": \"${COVERAGE}%\", \"color\": \"$COLOR\"}" > coverage-badge.json
         
     - name: Comment PR with coverage
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       if: github.event_name == 'pull_request'
       with:
         script: |

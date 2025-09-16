@@ -10,6 +10,7 @@ on:
         description: 'Type of tests to run'
         required: false
         default: 'all'
+        type: choice
         options:
         - all
         - standard
@@ -69,9 +70,6 @@ jobs:
 
     - uses: Swatinem/rust-cache@v2
 
-    - name: Install proptest dependencies
-      run: cargo install proptest --quiet
-
     - name: Run property tests
       run: cargo test --features property_testing --quiet
 
@@ -123,9 +121,9 @@ jobs:
       run: cargo tarpaulin --out Xml --output-dir coverage-xml --quiet
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v5
       with:
-        file: coverage-xml/cobertura.xml
+        files: coverage-xml/cobertura.xml
         flags: unittests
         name: codecov-umbrella
 
