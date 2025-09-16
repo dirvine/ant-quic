@@ -617,9 +617,7 @@ impl LinuxInterfaceDiscovery {
         }
 
         // Get interface flags
-        let flags_result = unsafe {
-            libc::ioctl(socket_fd, libc::SIOCGIFFLAGS as _, &mut ifreq)
-        };
+        let flags_result = unsafe { libc::ioctl(socket_fd, libc::SIOCGIFFLAGS as _, &mut ifreq) };
         if flags_result < 0 {
             unsafe {
                 libc::close(socket_fd);
@@ -747,9 +745,7 @@ impl LinuxInterfaceDiscovery {
             );
         }
 
-        let result = unsafe {
-            libc::ioctl(socket_fd, libc::SIOCGIFHWADDR as _, &mut ifreq)
-        };
+        let result = unsafe { libc::ioctl(socket_fd, libc::SIOCGIFHWADDR as _, &mut ifreq) };
         unsafe {
             libc::close(socket_fd);
         }
@@ -809,9 +805,8 @@ impl LinuxInterfaceDiscovery {
                 let ipv4_addr = Ipv4Addr::from(ip_bytes);
 
                 // Get netmask
-                let netmask_result = unsafe {
-                    libc::ioctl(socket_fd, libc::SIOCGIFNETMASK as _, &mut ifreq)
-                };
+                let netmask_result =
+                    unsafe { libc::ioctl(socket_fd, libc::SIOCGIFNETMASK as _, &mut ifreq) };
                 let prefix_len = if netmask_result >= 0 {
                     let netmask_sockaddr_in = unsafe {
                         &*(&ifreq.ifr_ifru.ifru_netmask as *const libc::sockaddr

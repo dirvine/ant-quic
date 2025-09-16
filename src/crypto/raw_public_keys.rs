@@ -512,9 +512,15 @@ mod tests {
 
     // Minimal DER length parser for tests
     fn parse_der_length(data: &[u8]) -> Option<(usize, usize)> {
-        if data.is_empty() { return None; }
-        if data[0] < 128 { return Some((data[0] as usize, 1)); }
-        if data[0] == 0x81 && data.len() >= 2 { return Some((data[1] as usize, 2)); }
+        if data.is_empty() {
+            return None;
+        }
+        if data[0] < 128 {
+            return Some((data[0] as usize, 1));
+        }
+        if data[0] == 0x81 && data.len() >= 2 {
+            return Some((data[1] as usize, 2));
+        }
         if data[0] == 0x82 && data.len() >= 3 {
             let len = ((data[1] as usize) << 8) | (data[2] as usize);
             return Some((len, 3));
@@ -568,7 +574,7 @@ mod tests {
         let oid_value = &spki[offset..offset + oid_len];
         offset += oid_len;
         // Ensure OID is ML-DSA-65
-        use crate::crypto::pqc::oids::{decode_oid_value, OID_ML_DSA_65};
+        use crate::crypto::pqc::oids::{OID_ML_DSA_65, decode_oid_value};
         let arcs = decode_oid_value(oid_value).unwrap();
         assert_eq!(arcs.as_slice(), OID_ML_DSA_65);
         // After AlgorithmIdentifier, expect BIT STRING
@@ -581,7 +587,10 @@ mod tests {
         assert_eq!(spki[offset], 0x00);
         offset += 1;
         assert_eq!(bs_len - 1, public_key.as_bytes().len());
-        assert_eq!(&spki[offset..offset + public_key.as_bytes().len()], public_key.as_bytes());
+        assert_eq!(
+            &spki[offset..offset + public_key.as_bytes().len()],
+            public_key.as_bytes()
+        );
     }
 
     #[test]

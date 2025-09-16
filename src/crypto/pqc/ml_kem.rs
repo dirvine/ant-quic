@@ -41,9 +41,10 @@ impl Clone for MlKem768 {
 
 impl MlKemOperations for MlKem768 {
     fn generate_keypair(&self) -> PqcResult<(MlKemPublicKey, MlKemSecretKey)> {
-        let (pub_key, sec_key) = self.inner.generate_keypair().map_err(|e| {
-            PqcError::KeyGenerationFailed(format!("Key generation failed: {}", e))
-        })?;
+        let (pub_key, sec_key) = self
+            .inner
+            .generate_keypair()
+            .map_err(|e| PqcError::KeyGenerationFailed(format!("Key generation failed: {}", e)))?;
 
         // Convert saorsa-pqc types to ant-quic types
         let ant_pub_key = MlKemPublicKey::from_bytes(pub_key.as_bytes())
@@ -62,10 +63,10 @@ impl MlKemOperations for MlKem768 {
         let saorsa_pub_key = SaorsaMlKemPublicKey::from_bytes(public_key.as_bytes())
             .map_err(|_| PqcError::InvalidPublicKey)?;
 
-        let (ciphertext, shared_secret) =
-            self.inner.encapsulate(&saorsa_pub_key).map_err(|e| {
-                PqcError::EncapsulationFailed(format!("Encapsulation failed: {}", e))
-            })?;
+        let (ciphertext, shared_secret) = self
+            .inner
+            .encapsulate(&saorsa_pub_key)
+            .map_err(|e| PqcError::EncapsulationFailed(format!("Encapsulation failed: {}", e)))?;
 
         // Convert back to ant-quic types
         let ant_ciphertext = MlKemCiphertext::from_bytes(ciphertext.as_bytes())
@@ -90,9 +91,7 @@ impl MlKemOperations for MlKem768 {
         let shared_secret = self
             .inner
             .decapsulate(&saorsa_secret_key, &saorsa_ciphertext)
-            .map_err(|e| {
-                PqcError::DecapsulationFailed(format!("Decapsulation failed: {}", e))
-            })?;
+            .map_err(|e| PqcError::DecapsulationFailed(format!("Decapsulation failed: {}", e)))?;
 
         // Convert back to ant-quic types
         let ant_shared_secret = SharedSecret::from_bytes(shared_secret.as_bytes())

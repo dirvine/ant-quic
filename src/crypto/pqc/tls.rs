@@ -35,10 +35,14 @@ impl PqcTlsExtension {
     }
 
     /// Create a classical-only configuration
-    pub fn classical_only() -> Self { Self::new() }
+    pub fn classical_only() -> Self {
+        Self::new()
+    }
 
     /// Create a PQC-only configuration (no fallback)
-    pub fn pqc_only() -> Self { Self::new() }
+    pub fn pqc_only() -> Self {
+        Self::new()
+    }
 
     /// Get supported named groups for TLS negotiation
     pub fn supported_groups(&self) -> &[NamedGroup] {
@@ -80,8 +84,11 @@ impl PqcTlsExtension {
 
     /// Perform group selection (PQC-only). Returns Selected on match, otherwise Failed.
     pub fn negotiate_group(&self, peer_groups: &[NamedGroup]) -> NegotiationResult<NamedGroup> {
-        let pqc_groups: Vec<NamedGroup> = peer_groups.iter().copied().filter(|g| g.is_pqc()).collect();
-        if let Some(group) = self.select_group(&pqc_groups) { return NegotiationResult::Selected(group); }
+        let pqc_groups: Vec<NamedGroup> =
+            peer_groups.iter().copied().filter(|g| g.is_pqc()).collect();
+        if let Some(group) = self.select_group(&pqc_groups) {
+            return NegotiationResult::Selected(group);
+        }
         NegotiationResult::Failed
     }
 
@@ -90,8 +97,14 @@ impl PqcTlsExtension {
         &self,
         peer_schemes: &[SignatureScheme],
     ) -> NegotiationResult<SignatureScheme> {
-        let pqc_schemes: Vec<SignatureScheme> = peer_schemes.iter().copied().filter(|s| s.is_pqc()).collect();
-        if let Some(scheme) = self.select_signature(&pqc_schemes) { return NegotiationResult::Selected(scheme); }
+        let pqc_schemes: Vec<SignatureScheme> = peer_schemes
+            .iter()
+            .copied()
+            .filter(|s| s.is_pqc())
+            .collect();
+        if let Some(scheme) = self.select_signature(&pqc_schemes) {
+            return NegotiationResult::Selected(scheme);
+        }
         NegotiationResult::Failed
     }
 }
@@ -118,7 +131,10 @@ impl<T> NegotiationResult<T> {
 
     /// Get the selected value if any
     pub fn value(&self) -> Option<&T> {
-        match self { Self::Selected(v) => Some(v), Self::Failed => None }
+        match self {
+            Self::Selected(v) => Some(v),
+            Self::Failed => None,
+        }
     }
 }
 
@@ -235,7 +251,11 @@ mod tests {
     fn test_wire_consistency_pqc_only_offers() {
         let ext = PqcTlsExtension::new();
         for g in ext.supported_groups() {
-            assert!(g.is_pqc() && !g.is_hybrid(), "group {:?} must be pure PQC", g);
+            assert!(
+                g.is_pqc() && !g.is_hybrid(),
+                "group {:?} must be pure PQC",
+                g
+            );
         }
         for s in ext.supported_signatures() {
             assert!(s.is_pqc() && !s.is_hybrid(), "sig {:?} must be pure PQC", s);
@@ -246,8 +266,12 @@ mod tests {
     fn test_pqc_extension_classical_only_is_alias() {
         let ext = PqcTlsExtension::classical_only();
         // Alias to PQC-only in this branch
-        for g in ext.supported_groups() { assert!(g.is_pqc()); }
-        for s in ext.supported_signatures() { assert!(s.is_pqc()); }
+        for g in ext.supported_groups() {
+            assert!(g.is_pqc());
+        }
+        for s in ext.supported_signatures() {
+            assert!(s.is_pqc());
+        }
     }
 
     #[test]

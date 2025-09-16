@@ -89,7 +89,9 @@ impl RelayStatisticsCollector {
 
     /// Record an authentication attempt
     pub fn record_auth_attempt(&self, success: bool, error: Option<&str>) {
-        let Ok(mut auth_stats) = self.auth_stats.lock() else { return; };
+        let Ok(mut auth_stats) = self.auth_stats.lock() else {
+            return;
+        };
         auth_stats.total_auth_attempts += 1;
 
         if success {
@@ -117,7 +119,9 @@ impl RelayStatisticsCollector {
 
     /// Record a rate limiting decision
     pub fn record_rate_limit(&self, allowed: bool) {
-        let Ok(mut rate_stats) = self.rate_limit_stats.lock() else { return; };
+        let Ok(mut rate_stats) = self.rate_limit_stats.lock() else {
+            return;
+        };
         rate_stats.total_requests += 1;
 
         if allowed {
@@ -144,9 +148,16 @@ impl RelayStatisticsCollector {
     pub fn collect_statistics(&self) -> RelayStatistics {
         let session_stats = self.collect_session_statistics();
         let connection_stats = self.collect_connection_statistics();
-        let auth_stats = self.auth_stats.lock().map(|g| g.clone()).unwrap_or_default();
-        let rate_limit_stats =
-            self.rate_limit_stats.lock().map(|g| g.clone()).unwrap_or_default();
+        let auth_stats = self
+            .auth_stats
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        let rate_limit_stats = self
+            .rate_limit_stats
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
         let error_stats = self.collect_error_statistics();
 
         let stats = RelayStatistics {
@@ -169,12 +180,18 @@ impl RelayStatisticsCollector {
 
     /// Get the last collected statistics snapshot
     pub fn get_last_snapshot(&self) -> RelayStatistics {
-        self.last_snapshot.lock().map(|g| g.clone()).unwrap_or_default()
+        self.last_snapshot
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
     }
 
     /// Collect session statistics from all registered session managers
     fn collect_session_statistics(&self) -> SessionStatistics {
-        let managers = match self.session_managers.lock() { Ok(g) => g, Err(_) => return SessionStatistics::default() };
+        let managers = match self.session_managers.lock() {
+            Ok(g) => g,
+            Err(_) => return SessionStatistics::default(),
+        };
         let mut total_stats = SessionStatistics::default();
 
         for manager in managers.iter() {
@@ -204,7 +221,10 @@ impl RelayStatisticsCollector {
 
     /// Collect connection statistics from all registered connections
     fn collect_connection_statistics(&self) -> ConnectionStatistics {
-        let connections = match self.connections.lock() { Ok(g) => g, Err(_) => return ConnectionStatistics::default() };
+        let connections = match self.connections.lock() {
+            Ok(g) => g,
+            Err(_) => return ConnectionStatistics::default(),
+        };
         let mut total_stats = ConnectionStatistics::default();
 
         total_stats.total_connections = connections.len() as u64;
@@ -235,8 +255,14 @@ impl RelayStatisticsCollector {
 
     /// Collect error statistics
     fn collect_error_statistics(&self) -> ErrorStatistics {
-        let error_counts = match self.error_counts.lock() { Ok(g) => g, Err(_) => return ErrorStatistics::default() };
-        let queue_stats = match self.queue_stats.lock() { Ok(g) => g, Err(_) => return ErrorStatistics::default() };
+        let error_counts = match self.error_counts.lock() {
+            Ok(g) => g,
+            Err(_) => return ErrorStatistics::default(),
+        };
+        let queue_stats = match self.queue_stats.lock() {
+            Ok(g) => g,
+            Err(_) => return ErrorStatistics::default(),
+        };
 
         let mut error_stats = ErrorStatistics::default();
         error_stats.error_breakdown = error_counts.clone();

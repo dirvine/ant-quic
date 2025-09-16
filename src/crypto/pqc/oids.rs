@@ -44,7 +44,9 @@ pub fn encode_oid_value(arcs: &[u32]) -> Vec<u8> {
             i -= 1;
             stack[i] = (v & 0x7f) as u8;
             v >>= 7;
-            if v == 0 { break; }
+            if v == 0 {
+                break;
+            }
         }
         for j in i..stack.len() {
             let is_last = j == stack.len() - 1;
@@ -56,7 +58,9 @@ pub fn encode_oid_value(arcs: &[u32]) -> Vec<u8> {
 
 /// Decode DER value bytes into dotted OID arcs (without tag/length)
 pub fn decode_oid_value(mut bytes: &[u8]) -> Option<Vec<u32>> {
-    if bytes.is_empty() { return None; }
+    if bytes.is_empty() {
+        return None;
+    }
     let first = bytes[0];
     let arc0 = (first / 40) as u32;
     let arc1 = (first % 40) as u32;
@@ -66,15 +70,18 @@ pub fn decode_oid_value(mut bytes: &[u8]) -> Option<Vec<u32>> {
         let mut v: u32 = 0;
         let mut i = 0;
         loop {
-            if bytes.is_empty() || i == 5 { return None; }
+            if bytes.is_empty() || i == 5 {
+                return None;
+            }
             let b = bytes[0];
             bytes = &bytes[1..];
             v = (v << 7) | (b & 0x7f) as u32;
             i += 1;
-            if b & 0x80 == 0 { break; }
+            if b & 0x80 == 0 {
+                break;
+            }
         }
         arcs.push(v);
     }
     Some(arcs)
 }
-

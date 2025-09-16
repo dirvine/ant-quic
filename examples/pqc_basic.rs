@@ -6,9 +6,7 @@
 use ant_quic::{
     auth::AuthConfig,
     crypto::pqc::PqcConfig,
-    crypto::raw_public_keys::key_utils::{
-        derive_peer_id_from_public_key, generate_ml_dsa_keypair,
-    },
+    crypto::raw_public_keys::key_utils::{derive_peer_id_from_public_key, generate_ml_dsa_keypair},
     nat_traversal_api::EndpointRole,
     quic_node::{QuicNodeConfig, QuicP2PNode},
 };
@@ -27,40 +25,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .init();
 
     // PQC is now always enabled
-    
+
     // Parse command line arguments
-        let args: Vec<String> = std::env::args().collect();
-        if args.len() < 2 {
-            println!("Usage: {} <server|client> [server_addr]", args[0]);
-            println!("\nExamples:");
-            println!(
-                "  {} server              # Start a PQC-enabled server",
-                args[0]
-            );
-            println!(
-                "  {} client 127.0.0.1:5000  # Connect to a PQC server",
-                args[0]
-            );
-            return Ok(());
-        }
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        println!("Usage: {} <server|client> [server_addr]", args[0]);
+        println!("\nExamples:");
+        println!(
+            "  {} server              # Start a PQC-enabled server",
+            args[0]
+        );
+        println!(
+            "  {} client 127.0.0.1:5000  # Connect to a PQC server",
+            args[0]
+        );
+        return Ok(());
+    }
 
-        let mode = &args[1];
+    let mode = &args[1];
 
-        match mode.as_str() {
-            "server" => run_server().await,
-            "client" => {
-                if args.len() < 3 {
-                    eprintln!("Error: Client mode requires server address");
-                    return Ok(());
-                }
-                let server_addr: SocketAddr = args[2].parse()?;
-                run_client(server_addr).await
+    match mode.as_str() {
+        "server" => run_server().await,
+        "client" => {
+            if args.len() < 3 {
+                eprintln!("Error: Client mode requires server address");
+                return Ok(());
             }
-            _ => {
-                eprintln!("Error: Unknown mode '{mode}'. Use 'server' or 'client'");
-                Ok(())
-            }
+            let server_addr: SocketAddr = args[2].parse()?;
+            run_client(server_addr).await
         }
+        _ => {
+            eprintln!("Error: Unknown mode '{mode}'. Use 'server' or 'client'");
+            Ok(())
+        }
+    }
 }
 
 async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

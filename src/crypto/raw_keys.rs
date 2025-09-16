@@ -190,7 +190,7 @@ pub fn create_ml_dsa_subject_public_key_info(
     //   subjectPublicKey BIT STRING (1952 bytes, unused bits = 0)
     // }
 
-    use crate::crypto::pqc::oids::{encode_oid_value, OID_ML_DSA_65};
+    use crate::crypto::pqc::oids::{OID_ML_DSA_65, encode_oid_value};
 
     let key_bytes = public_key.as_bytes();
     let key_len = key_bytes.len();
@@ -241,7 +241,13 @@ fn encode_der_length(output: &mut Vec<u8>, length: usize) {
 }
 
 fn der_length_len(length: usize) -> usize {
-    if length < 128 { 1 } else if length < 256 { 2 } else { 3 }
+    if length < 128 {
+        1
+    } else if length < 256 {
+        2
+    } else {
+        3
+    }
 }
 
 /// Extract an ML-DSA-65 public key from SubjectPublicKeyInfo format
@@ -284,9 +290,8 @@ pub fn extract_ml_dsa_key_from_spki(spki_der: &[u8]) -> Result<Vec<u8>, RawKeyEr
             "AlgorithmIdentifier missing OID".to_string(),
         ));
     }
-    let (oid_len, oid_len_bytes) =
-        parse_der_length(&spki_der[alg_start + 1..])
-            .ok_or_else(|| RawKeyError::InvalidFormat("Invalid OID length".to_string()))?;
+    let (oid_len, oid_len_bytes) = parse_der_length(&spki_der[alg_start + 1..])
+        .ok_or_else(|| RawKeyError::InvalidFormat("Invalid OID length".to_string()))?;
     let oid_start = alg_start + 1 + oid_len_bytes;
     let oid_end = oid_start + oid_len;
     if oid_end > alg_end {
@@ -294,13 +299,14 @@ pub fn extract_ml_dsa_key_from_spki(spki_der: &[u8]) -> Result<Vec<u8>, RawKeyEr
     }
     let oid_value = &spki_der[oid_start..oid_end];
     // Check OID matches ML-DSA-65
-    use crate::crypto::pqc::oids::{decode_oid_value, OID_ML_DSA_65};
+    use crate::crypto::pqc::oids::{OID_ML_DSA_65, decode_oid_value};
     let arcs = decode_oid_value(oid_value)
         .ok_or_else(|| RawKeyError::InvalidFormat("Invalid OID".to_string()))?;
     if arcs.as_slice() != OID_ML_DSA_65 {
-        return Err(RawKeyError::InvalidFormat(
-            format!("Unexpected OID for ML-DSA-65: {:?}", arcs),
-        ));
+        return Err(RawKeyError::InvalidFormat(format!(
+            "Unexpected OID for ML-DSA-65: {:?}",
+            arcs
+        )));
     }
     offset = alg_end;
 

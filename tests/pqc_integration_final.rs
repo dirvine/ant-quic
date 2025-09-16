@@ -4,15 +4,13 @@
 //! including ML-KEM-768 and ML-DSA-65 operations.
 
 use ant_quic::crypto::pqc::{
-    MlDsa65, MlKem768,
-    PqcConfig, PqcConfigBuilder,
-    MlDsaOperations, MlKemOperations,
+    MlDsa65, MlDsaOperations, MlKem768, MlKemOperations, PqcConfig, PqcConfigBuilder,
 };
 use std::time::{Duration, Instant};
 
 // Security requirements
-const MIN_ML_KEM_KEY_SIZE: usize = 1184;  // ML-KEM-768 public key size
-const MIN_ML_DSA_KEY_SIZE: usize = 1952;  // ML-DSA-65 public key size
+const MIN_ML_KEM_KEY_SIZE: usize = 1184; // ML-KEM-768 public key size
+const MIN_ML_DSA_KEY_SIZE: usize = 1952; // ML-DSA-65 public key size
 
 #[tokio::test]
 async fn test_ml_kem_operations() {
@@ -34,9 +32,7 @@ async fn test_ml_kem_operations() {
 
     // Test encapsulation
     let start = Instant::now();
-    let (ciphertext, shared_secret1) = ml_kem
-        .encapsulate(&pub_key)
-        .expect("Failed to encapsulate");
+    let (ciphertext, shared_secret1) = ml_kem.encapsulate(&pub_key).expect("Failed to encapsulate");
     let encap_time = start.elapsed();
 
     // Test decapsulation
@@ -168,7 +164,7 @@ async fn test_pqc_with_quic_endpoint() {
 
     // Note: In the full PQC branch, PQC is always enabled
     // and integrated at the TLS/crypto layer automatically
-    
+
     println!("PQC is now always enabled with:");
     println!("  • ML-KEM-768 for key exchange");
     println!("  • ML-DSA-65 for signatures");
@@ -205,15 +201,30 @@ async fn test_pqc_timeout_configuration() {
 #[test]
 fn test_pqc_key_sizes() {
     // Verify expected key sizes
-    
+
     // ML-KEM-768
-    assert_eq!(ant_quic::crypto::pqc::types::ML_KEM_768_PUBLIC_KEY_SIZE, 1184);
-    assert_eq!(ant_quic::crypto::pqc::types::ML_KEM_768_SECRET_KEY_SIZE, 2400);
-    assert_eq!(ant_quic::crypto::pqc::types::ML_KEM_768_CIPHERTEXT_SIZE, 1088);
-    
+    assert_eq!(
+        ant_quic::crypto::pqc::types::ML_KEM_768_PUBLIC_KEY_SIZE,
+        1184
+    );
+    assert_eq!(
+        ant_quic::crypto::pqc::types::ML_KEM_768_SECRET_KEY_SIZE,
+        2400
+    );
+    assert_eq!(
+        ant_quic::crypto::pqc::types::ML_KEM_768_CIPHERTEXT_SIZE,
+        1088
+    );
+
     // ML-DSA-65
-    assert_eq!(ant_quic::crypto::pqc::types::ML_DSA_65_PUBLIC_KEY_SIZE, 1952);
-    assert_eq!(ant_quic::crypto::pqc::types::ML_DSA_65_SECRET_KEY_SIZE, 4032);
+    assert_eq!(
+        ant_quic::crypto::pqc::types::ML_DSA_65_PUBLIC_KEY_SIZE,
+        1952
+    );
+    assert_eq!(
+        ant_quic::crypto::pqc::types::ML_DSA_65_SECRET_KEY_SIZE,
+        4032
+    );
     assert_eq!(ant_quic::crypto::pqc::types::ML_DSA_65_SIGNATURE_SIZE, 3309);
 }
 
@@ -221,10 +232,10 @@ fn test_pqc_key_sizes() {
 fn test_pqc_security_levels() {
     // ML-KEM-768 provides NIST Level 3 security (~192-bit classical)
     // ML-DSA-65 provides NIST Level 3 security (~192-bit classical)
-    
+
     // These provide strong post-quantum security against
     // attacks from both classical and quantum computers
-    
+
     println!("Security Levels:");
     println!("  ML-KEM-768: NIST Level 3 (~192-bit classical security)");
     println!("  ML-DSA-65: NIST Level 3 (~192-bit classical security)");
@@ -234,11 +245,11 @@ fn test_pqc_security_levels() {
 fn test_pqc_feature_always_enabled() {
     // PQC is now always enabled in the full_pqc branch
     // No feature flags are needed
-    
+
     // Verify that PQC types are always available
     let _ml_kem = MlKem768::new();
     let _ml_dsa = MlDsa65::new();
-    
+
     // Verify configuration is available
     let _config = PqcConfig::default();
 }
@@ -247,11 +258,11 @@ fn test_pqc_feature_always_enabled() {
 fn test_no_hybrid_mode_available() {
     // Hybrid modes that combined classical and PQC algorithms
     // are no longer available in the full_pqc branch
-    
+
     // The system now uses pure PQC:
     // - ML-DSA-65 only (no Ed25519)
     // - ML-KEM-768 only (no X25519)
-    
+
     println!("Pure PQC mode active:");
     println!("  • No classical cryptography fallback");
     println!("  • No hybrid modes available");

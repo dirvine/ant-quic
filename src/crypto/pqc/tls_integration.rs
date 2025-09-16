@@ -34,7 +34,10 @@ impl PqcHandshakeExtension {
     /// Create a new PQC handshake extension
     pub fn new(config: Arc<PqcConfig>) -> Self {
         let negotiator = PqcNegotiator::new((*config).clone());
-        Self { _config: config, negotiator }
+        Self {
+            _config: config,
+            negotiator,
+        }
     }
 
     /// Process ClientHello and filter supported algorithms
@@ -250,8 +253,14 @@ mod tests {
         let mut extension = PqcHandshakeExtension::new(config);
 
         // Simulate ClientHello with pure-PQC groups and signatures
-        let groups = vec![NamedGroup::MlKem768.to_u16(), NamedGroup::MlKem1024.to_u16()];
-        let signatures = vec![SignatureScheme::MlDsa65.to_u16(), SignatureScheme::MlDsa87.to_u16()];
+        let groups = vec![
+            NamedGroup::MlKem768.to_u16(),
+            NamedGroup::MlKem1024.to_u16(),
+        ];
+        let signatures = vec![
+            SignatureScheme::MlDsa65.to_u16(),
+            SignatureScheme::MlDsa87.to_u16(),
+        ];
 
         extension
             .process_client_hello(&groups, &signatures)

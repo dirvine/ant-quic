@@ -101,9 +101,7 @@ async fn test_endpoint(
         // Add system roots
         let certs_result = rustls_native_certs::load_native_certs();
         for cert in certs_result.certs {
-            roots
-                .add(cert)
-                .ok();
+            roots.add(cert).ok();
         }
         if !certs_result.errors.is_empty() {
             warn!(

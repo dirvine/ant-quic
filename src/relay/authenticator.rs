@@ -171,7 +171,9 @@ impl RelayAuthenticator {
     }
 
     #[cfg(test)]
-    pub fn new() -> Self { Self::try_new().expect("failed to construct RelayAuthenticator for test") }
+    pub fn new() -> Self {
+        Self::try_new().expect("failed to construct RelayAuthenticator for test")
+    }
 
     /// Create an authenticator with a specific keypair
     pub fn with_key(keypair: MlDsaKeyPair) -> Self {

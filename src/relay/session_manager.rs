@@ -165,7 +165,9 @@ pub enum ForwardDirection {
 
 impl SessionManager {
     /// Create a new session manager
-    pub fn try_new(config: SessionConfig) -> RelayResult<(Self, mpsc::UnboundedReceiver<SessionEvent>)> {
+    pub fn try_new(
+        config: SessionConfig,
+    ) -> RelayResult<(Self, mpsc::UnboundedReceiver<SessionEvent>)> {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
         let manager = Self {
@@ -233,10 +235,13 @@ impl SessionManager {
         }
 
         // Verify authentication token
-        let trusted_keys = self.trusted_keys.lock().map_err(|_| RelayError::NetworkError {
-            operation: "trusted_keys.lock".into(),
-            source: "mutex poisoned".into(),
-        })?;
+        let trusted_keys = self
+            .trusted_keys
+            .lock()
+            .map_err(|_| RelayError::NetworkError {
+                operation: "trusted_keys.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
         let peer_key =
             trusted_keys
                 .get(&client_addr)
@@ -266,10 +271,10 @@ impl SessionManager {
 
         // Store session
         {
-        let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
-            operation: "sessions.lock".into(),
-            source: "mutex poisoned".into(),
-        })?;
+            let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             sessions.insert(session_id, session_info);
         }
 
@@ -287,10 +292,10 @@ impl SessionManager {
     /// Establish a relay session
     pub fn establish_session(&self, session_id: SessionId) -> RelayResult<()> {
         let (client_addr, bandwidth_limit) = {
-        let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
-            operation: "sessions.lock".into(),
-            source: "mutex poisoned".into(),
-        })?;
+            let mut sessions = self.sessions.lock().map_err(|_| RelayError::NetworkError {
+                operation: "sessions.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
             let session = sessions
                 .get_mut(&session_id)
                 .ok_or(RelayError::SessionError {
@@ -331,10 +336,13 @@ impl SessionManager {
 
         // Store connection
         {
-            let mut connections = self.connections.lock().map_err(|_| RelayError::NetworkError {
-                operation: "connections.lock".into(),
-                source: "mutex poisoned".into(),
-            })?;
+            let mut connections =
+                self.connections
+                    .lock()
+                    .map_err(|_| RelayError::NetworkError {
+                        operation: "connections.lock".into(),
+                        source: "mutex poisoned".into(),
+                    })?;
             connections.insert(session_id, Arc::new(connection));
         }
 
@@ -363,10 +371,13 @@ impl SessionManager {
 
         // Terminate connection
         {
-            let mut connections = self.connections.lock().map_err(|_| RelayError::NetworkError {
-                operation: "connections.lock".into(),
-                source: "mutex poisoned".into(),
-            })?;
+            let mut connections =
+                self.connections
+                    .lock()
+                    .map_err(|_| RelayError::NetworkError {
+                        operation: "connections.lock".into(),
+                        source: "mutex poisoned".into(),
+                    })?;
             if let Some(connection) = connections.remove(&session_id) {
                 let _ = connection.terminate(reason.clone());
             }
@@ -388,10 +399,13 @@ impl SessionManager {
         direction: ForwardDirection,
     ) -> RelayResult<()> {
         let connection = {
-            let connections = self.connections.lock().map_err(|_| RelayError::NetworkError {
-                operation: "connections.lock".into(),
-                source: "mutex poisoned".into(),
-            })?;
+            let connections = self
+                .connections
+                .lock()
+                .map_err(|_| RelayError::NetworkError {
+                    operation: "connections.lock".into(),
+                    source: "mutex poisoned".into(),
+                })?;
             connections
                 .get(&session_id)
                 .cloned()
@@ -468,10 +482,13 @@ impl SessionManager {
 
     /// Clean up expired sessions
     pub fn cleanup_expired_sessions(&self) -> RelayResult<usize> {
-        let mut last_cleanup = self.last_cleanup.lock().map_err(|_| RelayError::NetworkError {
-            operation: "last_cleanup.lock".into(),
-            source: "mutex poisoned".into(),
-        })?;
+        let mut last_cleanup = self
+            .last_cleanup
+            .lock()
+            .map_err(|_| RelayError::NetworkError {
+                operation: "last_cleanup.lock".into(),
+                source: "mutex poisoned".into(),
+            })?;
         let now = Instant::now();
 
         // Only cleanup if enough time has passed

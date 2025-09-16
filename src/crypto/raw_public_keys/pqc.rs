@@ -85,7 +85,7 @@ impl ExtendedRawPublicKey {
 fn create_ml_dsa_subject_public_key_info(
     public_key: &MlDsa65PublicKey,
 ) -> Result<Vec<u8>, PqcError> {
-    use crate::crypto::pqc::oids::{encode_oid_value, OID_ML_DSA_65};
+    use crate::crypto::pqc::oids::{OID_ML_DSA_65, encode_oid_value};
     let key_bytes = public_key.as_bytes();
     let key_len = key_bytes.len();
 
@@ -138,17 +138,25 @@ fn extract_ml_dsa_from_spki(spki: &[u8]) -> Result<MlDsa65PublicKey, PqcError> {
         return Err(PqcError::InvalidPublicKey);
     }
     offset += 1;
-    let (algo_len, len_bytes) = parse_der_length(&spki[offset..]).ok_or(PqcError::InvalidPublicKey)?;
+    let (algo_len, len_bytes) =
+        parse_der_length(&spki[offset..]).ok_or(PqcError::InvalidPublicKey)?;
     let alg_start = offset + len_bytes;
     let alg_end = alg_start + algo_len;
-    if spki.get(alg_start) != Some(&0x06) { return Err(PqcError::InvalidPublicKey); }
-    let (oid_len, oid_len_bytes) = parse_der_length(&spki[alg_start + 1..]).ok_or(PqcError::InvalidPublicKey)?;
+    if spki.get(alg_start) != Some(&0x06) {
+        return Err(PqcError::InvalidPublicKey);
+    }
+    let (oid_len, oid_len_bytes) =
+        parse_der_length(&spki[alg_start + 1..]).ok_or(PqcError::InvalidPublicKey)?;
     let oid_start = alg_start + 1 + oid_len_bytes;
     let oid_end = oid_start + oid_len;
-    if oid_end > alg_end { return Err(PqcError::InvalidPublicKey); }
-    use crate::crypto::pqc::oids::{decode_oid_value, OID_ML_DSA_65};
+    if oid_end > alg_end {
+        return Err(PqcError::InvalidPublicKey);
+    }
+    use crate::crypto::pqc::oids::{OID_ML_DSA_65, decode_oid_value};
     let arcs = decode_oid_value(&spki[oid_start..oid_end]).ok_or(PqcError::InvalidPublicKey)?;
-    if arcs.as_slice() != OID_ML_DSA_65 { return Err(PqcError::InvalidPublicKey); }
+    if arcs.as_slice() != OID_ML_DSA_65 {
+        return Err(PqcError::InvalidPublicKey);
+    }
     offset = alg_end;
 
     // Parse the BIT STRING
@@ -232,7 +240,13 @@ fn encode_length(output: &mut Vec<u8>, len: usize) {
 }
 
 fn der_len_len(len: usize) -> usize {
-    if len < 128 { 1 } else if len < 256 { 2 } else { 3 }
+    if len < 128 {
+        1
+    } else if len < 256 {
+        2
+    } else {
+        3
+    }
 }
 
 /// PQC-aware Raw Public Key Verifier

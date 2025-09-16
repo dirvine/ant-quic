@@ -12,7 +12,7 @@ use std::{
 async fn test_minimal_connection() {
     // Install crypto provider
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    
+
     // Generate certificate using rcgen
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
     let cert_der: rustls::pki_types::CertificateDer = cert.cert.into();
@@ -31,11 +31,12 @@ async fn test_minimal_connection() {
 
     let server_config =
         ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto).unwrap()));
-    let server = Endpoint::server(server_config, SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
+    let server =
+        Endpoint::server(server_config, SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
     let server_addr = server.local_addr().unwrap();
-    
+
     println!("Server listening on {}", server_addr);
-    
+
     // Spawn server task
     let server_handle = tokio::spawn(async move {
         println!("Server: Waiting for connections...");
@@ -44,7 +45,10 @@ async fn test_minimal_connection() {
                 println!("Server: Got incoming connection");
                 match incoming.await {
                     Ok(conn) => {
-                        println!("Server: Connection established from {}", conn.remote_address());
+                        println!(
+                            "Server: Connection established from {}",
+                            conn.remote_address()
+                        );
                         conn
                     }
                     Err(e) => {
@@ -61,15 +65,15 @@ async fn test_minimal_connection() {
             }
         }
     });
-    
+
     // Give server time to start
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    
+
     // Create client
     let mut client = Endpoint::client(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
-    
+
     println!("Client endpoint created");
-    
+
     // Configure client with dangerous verifier
     let mut client_crypto = rustls::ClientConfig::builder()
         .dangerous()
@@ -79,14 +83,15 @@ async fn test_minimal_connection() {
 
     println!("Client crypto config created");
 
-    let client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto).unwrap()));
+    let client_config =
+        ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto).unwrap()));
     client.set_default_client_config(client_config);
-    
+
     println!("Client connecting to {}", server_addr);
-    
+
     // Try to connect with explicit timeout
     let connecting = client.connect(server_addr, "localhost").unwrap();
-    
+
     match tokio::time::timeout(std::time::Duration::from_secs(5), connecting).await {
         Ok(Ok(conn)) => {
             println!("Client: Connected to {}", conn.remote_address());
@@ -102,7 +107,7 @@ async fn test_minimal_connection() {
             panic!("Connection timed out");
         }
     }
-    
+
     // Wait for server to finish
     let _ = server_handle.await;
 }

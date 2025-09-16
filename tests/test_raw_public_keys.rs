@@ -1,13 +1,8 @@
 //! Tests for Raw Public Keys (RFC 7250) support
 
-use ant_quic::crypto::certificate_negotiation::{
-    CertificateNegotiationManager,
-    NegotiationConfig,
-};
-use ant_quic::crypto::tls_extensions::{
-    CertificateTypePreferences,
-};
+use ant_quic::crypto::certificate_negotiation::{CertificateNegotiationManager, NegotiationConfig};
 use ant_quic::crypto::raw_public_keys::key_utils;
+use ant_quic::crypto::tls_extensions::CertificateTypePreferences;
 use std::time::Duration;
 
 #[test]
@@ -39,7 +34,7 @@ fn test_certificate_type_negotiation() {
 
     // Start a negotiation
     let preferences = CertificateTypePreferences::raw_public_key_only();
-    
+
     let _negotiation = manager.start_negotiation(preferences).unwrap();
     // Negotiation started successfully
 }
@@ -47,11 +42,17 @@ fn test_certificate_type_negotiation() {
 #[test]
 fn test_certificate_type_preferences() {
     use ant_quic::crypto::tls_extensions::CertificateTypeList;
-    
+
     // Test preference ordering
     let pref1 = CertificateTypePreferences::raw_public_key_only();
-    assert_eq!(pref1.client_types, CertificateTypeList::raw_public_key_only());
-    assert_eq!(pref1.server_types, CertificateTypeList::raw_public_key_only());
+    assert_eq!(
+        pref1.client_types,
+        CertificateTypeList::raw_public_key_only()
+    );
+    assert_eq!(
+        pref1.server_types,
+        CertificateTypeList::raw_public_key_only()
+    );
 
     let pref2 = CertificateTypePreferences::prefer_raw_public_key();
     // Can't directly compare the lists without accessing their internals
@@ -82,7 +83,7 @@ fn test_negotiation_flow() {
 
     // Would need to simulate server response accepting raw public keys
     // but the API has changed, so we just test the negotiation starts
-    
+
     // Verify the negotiation was created successfully
     // The negotiation_id is opaque, just verify it was created
     let _ = negotiation_id;
@@ -116,10 +117,10 @@ fn test_peer_id_derivation() {
 
     // Derive peer ID from public key
     let peer_id = key_utils::derive_peer_id_from_public_key(&public_key);
-    
+
     // Peer ID should be non-empty (checking the inner array)
     assert!(!peer_id.0.is_empty());
-    
+
     // Same key should produce same peer ID
     let peer_id2 = key_utils::derive_peer_id_from_public_key(&public_key);
     assert_eq!(peer_id, peer_id2);

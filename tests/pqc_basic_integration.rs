@@ -2,10 +2,7 @@
 //!
 //! This test suite performs basic validation of PQC functionality
 
-use ant_quic::crypto::pqc::{
-    PqcConfigBuilder,
-    types::PqcError,
-};
+use ant_quic::crypto::pqc::{PqcConfigBuilder, types::PqcError};
 
 #[test]
 fn test_pqc_config_builder() {
@@ -33,7 +30,7 @@ fn test_pqc_config_builder() {
 fn test_pqc_algorithm_availability() {
     // Verify ML-KEM-768 is available
     use ant_quic::crypto::pqc::{MlKem768, MlKemOperations};
-    
+
     let ml_kem = MlKem768::new();
     match ml_kem.generate_keypair() {
         Ok((pub_key, _sec_key)) => {
@@ -49,7 +46,7 @@ fn test_pqc_algorithm_availability() {
 
     // Verify ML-DSA-65 is available
     use ant_quic::crypto::pqc::{MlDsa65, MlDsaOperations};
-    
+
     let ml_dsa = MlDsa65::new();
     match ml_dsa.generate_keypair() {
         Ok((pub_key, _sec_key)) => {

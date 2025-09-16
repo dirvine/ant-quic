@@ -4,7 +4,9 @@
 
 use ant_quic::{
     auth::{AuthConfig, AuthManager, AuthMessage},
-    crypto::raw_public_keys::key_utils::{derive_peer_id_from_public_key, generate_ml_dsa_keypair, public_key_to_bytes},
+    crypto::raw_public_keys::key_utils::{
+        derive_peer_id_from_public_key, generate_ml_dsa_keypair, public_key_to_bytes,
+    },
 };
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::{sync::Arc, time::Duration};

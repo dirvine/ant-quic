@@ -8,7 +8,7 @@ use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("=== ant-quic PQC Configuration Demo ===\n");
-    
+
     println!("ant-quic has transitioned to full post-quantum cryptography.");
     println!("PQC is always enabled with ML-DSA-65 and ML-KEM-768.\n");
 
@@ -37,8 +37,14 @@ fn default_config() -> Result<(), Box<dyn Error>> {
     println!("Configuration:");
     println!("   ML-KEM-768: {}", pqc_config.ml_kem_enabled);
     println!("   ML-DSA-65: {}", pqc_config.ml_dsa_enabled);
-    println!("   Memory Pool Size: {} buffers", pqc_config.memory_pool_size);
-    println!("   Handshake Timeout Multiplier: {:.1}x", pqc_config.handshake_timeout_multiplier);
+    println!(
+        "   Memory Pool Size: {} buffers",
+        pqc_config.memory_pool_size
+    );
+    println!(
+        "   Handshake Timeout Multiplier: {:.1}x",
+        pqc_config.handshake_timeout_multiplier
+    );
     println!();
 
     Ok(())
@@ -48,12 +54,13 @@ fn custom_memory_pool() -> Result<(), Box<dyn Error>> {
     println!("📋 Example 2: Custom Memory Pool Configuration");
     println!("-----------------------------------------------");
 
-    let pqc_config = PqcConfigBuilder::default()
-        .memory_pool_size(100)
-        .build()?;
+    let pqc_config = PqcConfigBuilder::default().memory_pool_size(100).build()?;
 
     println!("Configuration:");
-    println!("   Memory Pool Size: {} buffers", pqc_config.memory_pool_size);
+    println!(
+        "   Memory Pool Size: {} buffers",
+        pqc_config.memory_pool_size
+    );
     println!("   (Useful for high-connection servers)");
     println!();
 
@@ -69,7 +76,10 @@ fn custom_timeout() -> Result<(), Box<dyn Error>> {
         .build()?;
 
     println!("Configuration:");
-    println!("   Handshake Timeout Multiplier: {:.1}x", pqc_config.handshake_timeout_multiplier);
+    println!(
+        "   Handshake Timeout Multiplier: {:.1}x",
+        pqc_config.handshake_timeout_multiplier
+    );
     println!("   (Useful for high-latency networks)");
     println!();
 
@@ -81,15 +91,21 @@ fn production_config() -> Result<(), Box<dyn Error>> {
     println!("---------------------------------------");
 
     let pqc_config = PqcConfigBuilder::default()
-        .memory_pool_size(500)          // Large pool for many connections
-        .handshake_timeout_multiplier(2.5)  // Moderate timeout increase
+        .memory_pool_size(500) // Large pool for many connections
+        .handshake_timeout_multiplier(2.5) // Moderate timeout increase
         .build()?;
 
     println!("Configuration:");
     println!("   ML-KEM-768: {}", pqc_config.ml_kem_enabled);
     println!("   ML-DSA-65: {}", pqc_config.ml_dsa_enabled);
-    println!("   Memory Pool Size: {} buffers", pqc_config.memory_pool_size);
-    println!("   Handshake Timeout Multiplier: {:.1}x", pqc_config.handshake_timeout_multiplier);
+    println!(
+        "   Memory Pool Size: {} buffers",
+        pqc_config.memory_pool_size
+    );
+    println!(
+        "   Handshake Timeout Multiplier: {:.1}x",
+        pqc_config.handshake_timeout_multiplier
+    );
     println!();
 
     println!("📝 Notes:");

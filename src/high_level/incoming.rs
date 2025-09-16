@@ -74,13 +74,10 @@ impl Incoming {
                 return Err(RetryError(Box::new(Incoming(None))));
             }
         };
-        state
-            .endpoint
-            .retry(state.inner)
-            .map_err(|e| {
-                error!("Retry failed: {}", e);
-                RetryError(Box::new(Incoming(None)))
-            })
+        state.endpoint.retry(state.inner).map_err(|e| {
+            error!("Retry failed: {}", e);
+            RetryError(Box::new(Incoming(None)))
+        })
     }
 
     /// Ignore this incoming connection attempt, not sending any packet in response

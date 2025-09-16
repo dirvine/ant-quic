@@ -10,9 +10,7 @@
 
 use ant_quic::{
     auth::{AuthConfig, AuthError, AuthManager, AuthMessage},
-    crypto::raw_keys::{
-        MlDsaKeyPair, MlDsaPublicKey, derive_peer_id_from_public_key,
-    },
+    crypto::raw_keys::{MlDsaKeyPair, MlDsaPublicKey, derive_peer_id_from_public_key},
     crypto::raw_public_keys::key_utils::generate_ml_dsa_keypair,
     nat_traversal_api::PeerId,
 };

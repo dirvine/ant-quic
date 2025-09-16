@@ -447,7 +447,8 @@ impl MacOSInterfaceDiscovery {
         }
 
         // Create dynamic store
-        let store_name = CString::new("ant-quic-network-discovery").unwrap_or_else(|_| CString::new("").unwrap());
+        let store_name = CString::new("ant-quic-network-discovery")
+            .unwrap_or_else(|_| CString::new("").unwrap());
         let sc_store = unsafe {
             // SCDynamicStoreCreate equivalent
             self.create_dynamic_store(store_name.as_ptr())
@@ -474,7 +475,9 @@ impl MacOSInterfaceDiscovery {
         self.initialize_dynamic_store()?;
 
         let Some(sc_store) = self.sc_store.as_ref() else {
-            return Err(MacOSNetworkError::DynamicStoreAccessFailed { reason: "Dynamic store not initialized".into() });
+            return Err(MacOSNetworkError::DynamicStoreAccessFailed {
+                reason: "Dynamic store not initialized".into(),
+            });
         };
 
         unsafe {

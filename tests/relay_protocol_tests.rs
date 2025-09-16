@@ -11,7 +11,8 @@ use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_session_manager_lifecycle() -> RelayResult<()> {
-    let (session_manager, mut event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
+    let (session_manager, mut event_receiver) =
+        SessionManager::try_new(SessionConfig::default()).unwrap();
 
     // Add a trusted key for testing
     let keypair = MlDsaKeyPair::generate().unwrap();
@@ -48,7 +49,8 @@ async fn test_session_manager_lifecycle() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_session_manager_authentication() -> RelayResult<()> {
-    let (session_manager, _event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
+    let (session_manager, _event_receiver) =
+        SessionManager::try_new(SessionConfig::default()).unwrap();
 
     let client_addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
     let keypair = MlDsaKeyPair::generate().unwrap();
@@ -265,7 +267,8 @@ async fn test_relay_statistics_health_check() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_session_manager_key_management() {
-    let (session_manager, _event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
+    let (session_manager, _event_receiver) =
+        SessionManager::try_new(SessionConfig::default()).unwrap();
 
     let addr1: SocketAddr = "127.0.0.1:12345".parse().unwrap();
     let addr2: SocketAddr = "127.0.0.1:12346".parse().unwrap();

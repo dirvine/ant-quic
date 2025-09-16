@@ -33,7 +33,7 @@ mod pqc_integration {
         )
         .expect("Failed to create ML-DSA public key");
         let pqc_key = ExtendedRawPublicKey::MlDsa65(ml_dsa_key);
-        
+
         // Export SPKI for ML-DSA
         let ml_dsa_spki_result = pqc_key.to_subject_public_key_info();
         match ml_dsa_spki_result {
@@ -82,14 +82,14 @@ mod pqc_integration {
 
         let reset_key: Arc<dyn HmacKey> = Arc::new(DummyHmacKey);
         let mut endpoint_config = EndpointConfig::new(reset_key);
-        
+
         // Configure NAT traversal parameters
         endpoint_config.max_udp_payload_size(1200).unwrap();
-        
+
         // Configure keep-alive via TransportConfig
         let mut transport_config = ant_quic::TransportConfig::default();
         transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(30)));
-        
+
         // Verify configuration
         assert_eq!(endpoint_config.get_max_udp_payload_size(), 1200);
     }

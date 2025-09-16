@@ -1,11 +1,7 @@
 //! Integration tests for PQC raw public key support
 
 mod pqc_raw_public_key_tests {
-    use ant_quic::crypto::pqc::{
-        MlDsaOperations,
-        ml_dsa::MlDsa65,
-        types::PqcError,
-    };
+    use ant_quic::crypto::pqc::{MlDsaOperations, ml_dsa::MlDsa65, types::PqcError};
     use ant_quic::crypto::raw_public_keys::pqc::{ExtendedRawPublicKey, PqcRawPublicKeyVerifier};
     use rustls::SignatureScheme;
 
@@ -66,14 +62,14 @@ mod pqc_raw_public_key_tests {
     #[test]
     fn test_pqc_verifier_with_ml_dsa_keys() {
         let ml_dsa = MlDsa65::new();
-        
+
         match ml_dsa.generate_keypair() {
             Ok((ml_dsa_key, _)) => {
                 let ml_dsa_raw = ExtendedRawPublicKey::MlDsa65(ml_dsa_key);
-                
+
                 // Create verifier with a vector containing the key
                 let _verifier = PqcRawPublicKeyVerifier::new(vec![ml_dsa_raw]);
-                
+
                 // Verifier created successfully with ML-DSA key
             }
             Err(PqcError::OperationNotSupported) => {
@@ -93,13 +89,13 @@ mod pqc_raw_public_key_tests {
         match ml_dsa.generate_keypair() {
             Ok((ml_dsa_key, _)) => {
                 let large_key = ExtendedRawPublicKey::MlDsa65(ml_dsa_key);
-                
+
                 // Test serialization
                 match large_key.to_subject_public_key_info() {
                     Ok(spki) => {
                         // ML-DSA public keys are larger
                         assert!(spki.len() > 1900);
-                        
+
                         // Test deserialization round-trip
                         match ExtendedRawPublicKey::from_subject_public_key_info(&spki) {
                             Ok(_) => {

@@ -40,9 +40,10 @@ impl Clone for MlDsa65 {
 
 impl MlDsaOperations for MlDsa65 {
     fn generate_keypair(&self) -> PqcResult<(MlDsaPublicKey, MlDsaSecretKey)> {
-        let (pub_key, sec_key) = self.inner.generate_keypair().map_err(|e| {
-            PqcError::KeyGenerationFailed(format!("Key generation failed: {}", e))
-        })?;
+        let (pub_key, sec_key) = self
+            .inner
+            .generate_keypair()
+            .map_err(|e| PqcError::KeyGenerationFailed(format!("Key generation failed: {}", e)))?;
 
         // Convert saorsa-pqc types to ant-quic types
         let ant_pub_key = MlDsaPublicKey::from_bytes(pub_key.as_bytes())

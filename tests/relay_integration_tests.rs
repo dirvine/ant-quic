@@ -165,7 +165,8 @@ async fn test_relay_statistics_integration() -> RelayResult<()> {
 
 #[tokio::test]
 async fn test_session_lifecycle_integration() -> RelayResult<()> {
-    let (session_manager, mut event_receiver) = SessionManager::try_new(SessionConfig::default()).unwrap();
+    let (session_manager, mut event_receiver) =
+        SessionManager::try_new(SessionConfig::default()).unwrap();
 
     let client_addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
     let keypair = generate_ml_dsa_keypair();

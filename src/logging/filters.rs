@@ -245,7 +245,9 @@ impl DynamicLogFilter {
         let mut filter = self
             .inner
             .write()
-            .map_err(|_| -> Box<dyn std::error::Error> { Box::from("log filter lock poisoned".to_string()) })?;
+            .map_err(|_| -> Box<dyn std::error::Error> {
+                Box::from("log filter lock poisoned".to_string())
+            })?;
         updater(&mut filter)?;
         Ok(())
     }

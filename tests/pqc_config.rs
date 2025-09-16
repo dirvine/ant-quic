@@ -1,6 +1,6 @@
 //! Tests for Post-Quantum Cryptography configuration API
 
-use ant_quic::crypto::pqc::{PqcConfig};
+use ant_quic::crypto::pqc::PqcConfig;
 use ant_quic::{
     EndpointConfig,
     crypto::{CryptoError, HmacKey},
@@ -55,11 +55,11 @@ fn test_pqc_config_integration_with_endpoint() {
 #[test]
 fn test_pqc_config_defaults() {
     let config = PqcConfig::default();
-    
+
     // PQC is always enabled
     assert!(config.ml_kem_enabled);
     assert!(config.ml_dsa_enabled);
-    
+
     // Check default values
     assert_eq!(config.memory_pool_size, 10);
     assert_eq!(config.handshake_timeout_multiplier, 2.0);
@@ -74,7 +74,7 @@ fn test_pqc_config_builder_customization() {
         .handshake_timeout_multiplier(3.5)
         .build()
         .unwrap();
-    
+
     assert!(config.ml_kem_enabled);
     assert!(config.ml_dsa_enabled);
     assert_eq!(config.memory_pool_size, 50);
