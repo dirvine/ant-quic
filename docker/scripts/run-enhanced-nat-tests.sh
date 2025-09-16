@@ -29,17 +29,14 @@ PASSED_TESTS=0
 FAILED_TESTS=0
 
 # Track resolved container names for client services (client1..client5)
-CLIENT_CONTAINERS=()
+declare -a CLIENT_CONTAINERS
 
 get_client_container() {
     local service="$1"
     local idx="${service#client}"
     if [[ "$idx" =~ ^[0-9]+$ ]]; then
         if [ -z "${CLIENT_CONTAINERS[$idx]-}" ]; then
-            mapfile -t _temp_names < <(docker ps -a --filter "label=com.docker.compose.service=client${idx}" --format '{{.Names}}' 2>/dev/null || true)
-            if [ "${#_temp_names[@]}" -gt 0 ]; then
-                CLIENT_CONTAINERS[$idx]="${_temp_names[0]}"
-            fi
+            resolve_client_containers || true
         fi
         if [ -n "${CLIENT_CONTAINERS[$idx]-}" ]; then
             echo "${CLIENT_CONTAINERS[$idx]}"
@@ -50,9 +47,11 @@ get_client_container() {
 }
 
 resolve_client_containers() {
+    local original_ifs=$IFS
     for idx in 1 2 3 4 5; do
-        mapfile -t _client_names < <(docker ps -a --filter "label=com.docker.compose.service=client${idx}" --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true)
-        if [ "${#_client_names[@]}" -eq 0 ]; then
+        local output
+        output=$(docker ps -a --filter "label=com.docker.compose.service=client${idx}" --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true)
+        if [ -z "$output" ]; then
             warn "No containers reported for client${idx}; falling back to ant-quic-client${idx}"
             CLIENT_CONTAINERS[$idx]="ant-quic-client${idx}"
             continue
@@ -60,26 +59,34 @@ resolve_client_containers() {
 
         local all_running=true
         local first_name=""
-        for entry in "${_client_names[@]}"; do
-            local name="${entry%%$'\t'*}"
-            local state="${entry#*$'\t'}"
-            if [[ -z "$first_name" ]]; then
+
+        IFS=$'\n'
+        for entry in $output; do
+            [ -z "$entry" ] && continue
+            local name status
+            IFS=$'\t' read -r name status <<EOF
+$entry
+EOF
+            if [ -z "$first_name" ]; then
                 first_name="$name"
             fi
-            if [[ "$state" != Up* ]]; then
+            if [[ "$status" != Up* ]]; then
                 all_running=false
-                error "✗ ${name} is not running (state=$state)"
+                error "✗ ${name} is not running (state=$status)"
             fi
+            IFS=$'\n'
         done
+        IFS=$original_ifs
 
         CLIENT_CONTAINERS[$idx]="$first_name"
 
         if $all_running; then
-            log "✓ client${idx} containers running (${_client_names[*]//\t/ })"
+            log "✓ client${idx} containers running ($output)"
         else
             return 1
         fi
     done
+    return 0
 }
 
 # Logging functions
