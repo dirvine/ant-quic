@@ -389,16 +389,20 @@ test_p2p_connection() {
     local addr_file="./shared/ant-quic-peer-${client2_name}.addr"
     : > "$addr_file" || true
     local receiver_container="$client2_container"
-    local v4_ip
-    v4_ip=$(docker inspect -f '{{ index .NetworkSettings.Networks "docker_internet" "IPAddress" }}' "$receiver_container" 2>/dev/null || true)
-    if [ -n "$v4_ip" ]; then
-        echo "${v4_ip}:${recv_port}" >> "$addr_file" || true
-    fi
-    local v6_ip
-    v6_ip=$(docker inspect -f '{{ index .NetworkSettings.Networks "docker_internet" "GlobalIPv6Address" }}' "$receiver_container" 2>/dev/null || true)
-    if [ -n "$v6_ip" ]; then
-        echo "[${v6_ip}]:${recv_port}" >> "$addr_file" || true
-    fi
+    local v4_ips
+    v4_ips=$(docker inspect -f '{{range $name, $conf := .NetworkSettings.Networks}}{{if $conf.IPAddress}}{{$conf.IPAddress}} {{end}}{{end}}' "$receiver_container" 2>/dev/null || true)
+    for ip in $v4_ips; do
+        if [ -n "$ip" ]; then
+            echo "${ip}:${recv_port}" >> "$addr_file" || true
+        fi
+    done
+    local v6_ips
+    v6_ips=$(docker inspect -f '{{range $name, $conf := .NetworkSettings.Networks}}{{if $conf.GlobalIPv6Address}}{{$conf.GlobalIPv6Address}} {{end}}{{end}}' "$receiver_container" 2>/dev/null || true)
+    for ip in $v6_ips; do
+        if [ -n "$ip" ]; then
+            echo "[${ip}]:${recv_port}" >> "$addr_file" || true
+        fi
+    done
     
     # Get peer info via bootstrap; fallback to direct shared address if needed
     local peer_info=$(docker exec "$client1_container" \
