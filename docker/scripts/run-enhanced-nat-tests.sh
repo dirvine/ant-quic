@@ -40,9 +40,13 @@ init_test_env() {
     log "Initializing enhanced test environment..."
     
     # Create directories
+    uid=$(id -u)
+    gid=$(id -g)
+
     rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || sudo rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
     mkdir -p "$LOG_DIR" "$RESULTS_DIR" "$RESULTS_DIR/metrics" "$RESULTS_DIR/pcaps" ./shared
-    chmod 0777 "$LOG_DIR" "$RESULTS_DIR" "$RESULTS_DIR"/* ./shared 2>/dev/null || true
+    sudo chown -R "$uid:$gid" "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
+    chmod -R 0777 "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
     find ./shared -type f -name 'ant-quic-peer-*.addr' -delete 2>/dev/null || true
     
     # Check Docker Compose command
