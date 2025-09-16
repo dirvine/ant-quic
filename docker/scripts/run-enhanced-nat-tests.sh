@@ -28,6 +28,52 @@ TOTAL_TESTS=0
 PASSED_TESTS=0
 FAILED_TESTS=0
 
+# Track resolved container names for client services (client1..client5)
+CLIENT_CONTAINERS=()
+
+get_client_container() {
+    local service="$1"
+    local idx="${service#client}"
+    if [[ "$idx" =~ ^[0-9]+$ ]] && [ -n "${CLIENT_CONTAINERS[$idx]-}" ]; then
+        echo "${CLIENT_CONTAINERS[$idx]}"
+    else
+        echo "ant-quic-${service}"
+    fi
+}
+
+resolve_client_containers() {
+    for idx in 1 2 3 4 5; do
+        mapfile -t _client_names < <($COMPOSE_CMD -f "$COMPOSE_FILE" ps --filter "service=client${idx}" --format '{{.Name}}\t{{.State}}' 2>/dev/null || true)
+        if [ "${#_client_names[@]}" -eq 0 ]; then
+            warn "No containers reported for client${idx}; falling back to ant-quic-client${idx}"
+            CLIENT_CONTAINERS[$idx]="ant-quic-client${idx}"
+            continue
+        fi
+
+        local all_running=true
+        local first_name=""
+        for entry in "${_client_names[@]}"; do
+            local name="${entry%%$'\t'*}"
+            local state="${entry#*$'\t'}"
+            if [[ -z "$first_name" ]]; then
+                first_name="$name"
+            fi
+            if [[ "$state" != running* ]]; then
+                all_running=false
+                error "✗ ${name} is not running (state=$state)"
+            fi
+        done
+
+        CLIENT_CONTAINERS[$idx]="$first_name"
+
+        if $all_running; then
+            log "✓ client${idx} containers running (${_client_names[*]//\t/ })"
+        else
+            return 1
+        fi
+    done
+}
+
 # Logging functions
 log() { echo -e "${GREEN}[NAT-TEST]${NC} $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') $1" >&2; }
@@ -82,6 +128,11 @@ pre_cleanup() {
         fi
     done
 
+    # Remove any compose-managed client containers from previous runs (e.g., docker-client1-*)
+    docker ps -a --format '{{.Names}}' | grep -E '^(docker|ant-quic)-client[0-9](-[0-9]+)?$' | while read -r cname; do
+        docker rm -f "$cname" >/dev/null 2>&1 || true
+    done
+
     local nets=(docker_internet docker_nat1_lan docker_nat2_lan docker_nat3_lan docker_nat4_lan docker_nat5_lan)
     for net in "${nets[@]}"; do
         if docker network ls --format '{{.Name}}' | grep -qx "$net"; then
@@ -115,19 +166,9 @@ start_containers() {
     log "Waiting for services to initialize (30s)..."
     sleep 30
     
-    # Optionally attach clients to the public 'internet' bridge for reachability in local runs.
-    # Preserve default behavior for GitHub Actions (disabled unless ACT=true)
-    if [ "${ACT:-}" = "true" ] || [ "${LOCAL_NAT_ATTACH:-}" = "1" ]; then
-        warn "Attaching clients to 'docker_internet' network for reachability (local/ACT)"
-        for i in {1..5}; do
-            docker network connect docker_internet "ant-quic-client$i" 2>/dev/null || true
-        done
-    fi
+    # Health check core services using static names
+    local services=("ant-quic-bootstrap" "nat1-gateway" "nat2-gateway" "nat3-gateway" "nat4-gateway")
 
-    # Health check - using actual container names
-    local services=("ant-quic-bootstrap" "nat1-gateway" "nat2-gateway" "nat3-gateway" "nat4-gateway" 
-                   "ant-quic-client1" "ant-quic-client2" "ant-quic-client3" "ant-quic-client4" "ant-quic-client5")
-    
     for service in "${services[@]}"; do
         if docker ps -a --format '{{.Names}}\t{{.State}}' | grep -q "^${service}\s\+running$"; then
             # If bootstrap, prefer health=healthy when available
@@ -147,6 +188,20 @@ start_containers() {
             return 1
         fi
     done
+
+    if ! resolve_client_containers; then
+        return 1
+    fi
+
+    # Optionally attach primary client containers to the public network for local runs
+    if [ "${ACT:-}" = "true" ] || [ "${LOCAL_NAT_ATTACH:-}" = "1" ]; then
+        warn "Attaching clients to 'docker_internet' network for reachability (local/ACT)"
+        for i in {1..5}; do
+            local container
+            container=$(get_client_container "client$i")
+            docker network connect docker_internet "$container" 2>/dev/null || true
+        done
+    fi
     
     log "All services are running"
 }
@@ -157,7 +212,9 @@ start_chat_clients() {
 
     # Start clients in background
     for i in {1..5}; do
-        local client="ant-quic-client$i"
+        local client_name="client$i"
+        local client
+        client=$(get_client_container "$client_name")
         info "Starting chat client on $client..."
 
         # Start chat client in background with bootstrap configuration
@@ -171,7 +228,8 @@ start_chat_clients() {
 
     # Verify clients are connected
     for i in {1..5}; do
-        local client="ant-quic-client$i"
+        local client
+        client=$(get_client_container "client$i")
         if docker exec "$client" pgrep -f "ant-quic chat" > /dev/null 2>&1; then
             log "✓ Client $i is running"
         else
@@ -196,7 +254,8 @@ test_basic_connectivity() {
 
     # Test each client to bootstrap (IPv4) - try both direct and via gateway
     for i in {1..4}; do
-        local client="ant-quic-client$i"
+        local client
+        client=$(get_client_container "client$i")
         info "Testing connectivity from $client..."
 
         # First try to ping the bootstrap
@@ -229,14 +288,15 @@ test_basic_connectivity() {
 
     # Test dual-stack clients to bootstrap (IPv6)
     for i in {1..3}; do
-        local client="ant-quic-client$i"
+        local client
+        client=$(get_client_container "client$i")
         run_test "${test_name}_ipv6_client${i}" \
             "docker exec $client ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
     done
 
     # Test IPv6-only client
     run_test "${test_name}_ipv6_only_client5" \
-        "docker exec ant-quic-client5 ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
+        "docker exec $(get_client_container "client5") ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
 }
 
 # Test NAT traversal scenarios
@@ -276,6 +336,11 @@ test_p2p_connection() {
     ((TOTAL_TESTS++))
 
     debug "Testing P2P: $test_name ($protocol)"
+
+    local client1_container
+    local client2_container
+    client1_container=$(get_client_container "$client1_name")
+    client2_container=$(get_client_container "$client2_name")
     
     # Start listener on client2 (unique port per test)
     local base_port=9001
@@ -298,15 +363,15 @@ test_p2p_connection() {
     fi
     
     # Ensure no stale receiver remains from previous runs
-    docker exec "ant-quic-${client2_name}" sh -c "pkill -f 'ant-quic --listen' 2>/dev/null || pkill -f 'ant-quic --test-receiver' 2>/dev/null || true"
+    docker exec "$client2_container" sh -c "pkill -f 'ant-quic --listen' 2>/dev/null || pkill -f 'ant-quic --test-receiver' 2>/dev/null || true"
 
     # Start receiver; log inside container for reliability
-    docker exec -d "ant-quic-${client2_name}" sh -c \
+    docker exec -d "$client2_container" sh -c \
         "RUST_LOG=ant_quic=debug,ant_quic::nat_traversal=trace ant-quic --listen '$listen_addr' --test-receiver --id '${client2_name}' > /app/logs/${test_name}_receiver.log 2>&1"
     
     # Wait for receiver UDP port to be listening (up to ~15s)
     for _ in $(seq 1 30); do
-        if docker exec "ant-quic-${client2_name}" sh -c "ss -u -l | grep -q ':${recv_port} '" 2>/dev/null; then
+        if docker exec "$client2_container" sh -c "ss -u -l | grep -q ':${recv_port} '" 2>/dev/null; then
             break
         fi
         sleep 0.5
@@ -315,7 +380,7 @@ test_p2p_connection() {
     # Write direct addresses to shared file (fallback for query-peer)
     local addr_file="./shared/ant-quic-peer-${client2_name}.addr"
     : > "$addr_file" || true
-    local receiver_container="ant-quic-${client2_name}"
+    local receiver_container="$client2_container"
     local v4_ip
     v4_ip=$(docker inspect -f '{{ index .NetworkSettings.Networks "docker_internet" "IPAddress" }}' "$receiver_container" 2>/dev/null || true)
     if [ -n "$v4_ip" ]; then
@@ -328,7 +393,7 @@ test_p2p_connection() {
     fi
     
     # Get peer info via bootstrap; fallback to direct shared address if needed
-    local peer_info=$(docker exec "ant-quic-${client1_name}" \
+    local peer_info=$(docker exec "$client1_container" \
         ant-quic --query-peer "${client2_name}" --protocol "$protocol" 2>/dev/null || echo "")
     
     if [ -z "$peer_info" ]; then
@@ -355,12 +420,12 @@ test_p2p_connection() {
     fi
     
     # Attempt connection with one retry and extended timeout
-    if docker exec "ant-quic-${client1_name}" \
+    if docker exec "$client1_container" \
         timeout 60 sh -c "RUST_LOG=ant_quic=debug,ant_quic::nat_traversal=trace ant-quic --connect '$peer_addr' --test-sender" \
         > "$RESULTS_DIR/${test_name}_sender.log" 2>&1; then
         record_test_result "$test_name" "PASSED" "Connection successful"
     else
-        if docker exec "ant-quic-${client1_name}" \
+        if docker exec "$client1_container" \
             timeout 60 ant-quic --connect "$peer_addr" --test-sender \
             >> "$RESULTS_DIR/${test_name}_sender.log" 2>&1; then
             record_test_result "$test_name" "PASSED" "Connection successful (retry)"
@@ -370,8 +435,8 @@ test_p2p_connection() {
     fi
 
     # Stop receiver and copy its log out to results
-    docker exec "ant-quic-${client2_name}" sh -c "pkill -f 'ant-quic --listen' 2>/dev/null || pkill -f 'ant-quic --test-receiver' 2>/dev/null || true"
-    docker cp "ant-quic-${client2_name}:/app/logs/${test_name}_receiver.log" "$RESULTS_DIR/${test_name}_receiver.log" 2>/dev/null || true
+    docker exec "$client2_container" sh -c "pkill -f 'ant-quic --listen' 2>/dev/null || pkill -f 'ant-quic --test-receiver' 2>/dev/null || true"
+    docker cp "${client2_container}:/app/logs/${test_name}_receiver.log" "$RESULTS_DIR/${test_name}_receiver.log" 2>/dev/null || true
 }
 
 # Test address discovery
@@ -380,7 +445,8 @@ test_address_discovery() {
     
     # Test OBSERVED_ADDRESS frame functionality
     for i in {1..5}; do
-        local client="ant-quic-client$i"
+        local client
+        client=$(get_client_container "client$i")
         run_test "address_discovery_client${i}" \
             "docker exec $client ant-quic --discover-addresses --timeout 20"
     done
@@ -418,10 +484,10 @@ test_pqc_scenarios() {
     
     # Test with PQC enabled
     run_test "pqc_handshake_mlkem" \
-        "docker exec ant-quic-client1 ant-quic --connect 203.0.113.10:9000 --pqc-mode hybrid --timeout 20"
-    
+        "docker exec $(get_client_container \"client1\") ant-quic --connect 203.0.113.10:9000 --pqc-mode hybrid --timeout 20"
+
     run_test "pqc_p2p_connection" \
-        "docker exec ant-quic-client1 ant-quic --test-pqc-p2p client2 --timeout 30"
+        "docker exec $(get_client_container \"client1\") ant-quic --test-pqc-p2p client2 --timeout 30"
 }
 
 # Performance benchmarks
@@ -430,15 +496,15 @@ test_performance() {
     
     # Connection establishment time
     run_test "perf_connection_time" \
-        "docker exec ant-quic-client1 ant-quic --benchmark connection --target client2 --iterations 10"
+        "docker exec $(get_client_container \"client1\") ant-quic --benchmark connection --target client2 --iterations 10"
     
     # Throughput test
     run_test "perf_throughput" \
-        "docker exec ant-quic-client1 ant-quic --benchmark throughput --target client2 --size 100MB --duration 60"
+        "docker exec $(get_client_container \"client1\") ant-quic --benchmark throughput --target client2 --size 100MB --duration 60"
     
     # Concurrent connections
     run_test "perf_concurrent" \
-        "docker exec ant-quic-client1 ant-quic --benchmark concurrent --connections 100 --duration 30"
+        "docker exec $(get_client_container \"client1\") ant-quic --benchmark concurrent --connections 100 --duration 30"
 }
 
 # Helper: Run a single test
@@ -488,7 +554,7 @@ collect_metrics() {
     
     # Network statistics
     for i in {1..5}; do
-        docker exec "ant-quic-client$i" ss -s > "$RESULTS_DIR/metrics/client${i}_network_stats.txt" 2>/dev/null || true
+        docker exec "$(get_client_container \"client$i\")" ss -s > "$RESULTS_DIR/metrics/client${i}_network_stats.txt" 2>/dev/null || true
     done
 }
 
@@ -591,13 +657,13 @@ main() {
                 info "Running IPv6 support tests..."
                 # Reuse connectivity and discovery but emphasize IPv6 paths
                 # Basic IPv6 pings
-                for i in {1..3}; do
-                    run_test "ipv6_ping_client${i}" \
-                        "docker exec ant-quic-client${i} ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
-                done
-                # IPv6-only client
-                run_test "ipv6_only_ping_client5" \
-                    "docker exec ant-quic-client5 ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
+               for i in {1..3}; do
+                   run_test "ipv6_ping_client${i}" \
+                        "docker exec $(get_client_container \"client${i}\") ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
+               done
+               # IPv6-only client
+               run_test "ipv6_only_ping_client5" \
+                    "docker exec $(get_client_container \"client5\") ant-quic --ping [2001:db8:1::10]:9000 --timeout 10"
                 # Address discovery on all clients
                 test_address_discovery ;;
             test_stress|test_network_stress)
