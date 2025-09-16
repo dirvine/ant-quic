@@ -104,9 +104,19 @@ init_test_env() {
     uid=$(id -u)
     gid=$(id -g)
 
-    rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || sudo rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
-    mkdir -p "$LOG_DIR" "$RESULTS_DIR" "$RESULTS_DIR/metrics" "$RESULTS_DIR/pcaps" ./shared
-    sudo chown -R "$uid:$gid" "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
+    if [ "${LOCAL_NAT_SKIP_SUDO:-}" = "1" ]; then
+        rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
+    else
+        rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || sudo rm -rf "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
+    fi
+
+    mkdir -p "$LOG_DIR" "$RESULTS_DIR" "$RESULTS_DIR/metrics" "$RESULTS_DIR/pcaps" "$RESULTS_DIR/chats" ./shared
+
+    if [ "${LOCAL_NAT_SKIP_SUDO:-}" != "1" ]; then
+        sudo chown -R "$uid:$gid" "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
+    fi
+
+    chown -R "$uid:$gid" "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
     chmod -R 0777 "$LOG_DIR" "$RESULTS_DIR" ./shared 2>/dev/null || true
     find ./shared -type f -name 'ant-quic-peer-*.addr' -delete 2>/dev/null || true
     
@@ -249,6 +259,9 @@ start_chat_clients() {
             log "✓ Client $i is running"
         else
             warn "✗ Client $i failed to start"
+            docker cp "$client:/app/logs/client${i}_chat.log" "$RESULTS_DIR/chats/client${i}_chat.log" 2>/dev/null || true
+            docker exec "$client" sh -c "tail -n 100 /app/logs/client${i}_chat.log" 2>/dev/null >> "$RESULTS_DIR/chats/client${i}_chat.log" || true
+            warn "    captured chat log at $RESULTS_DIR/chats/client${i}_chat.log"
         fi
     done
 }
