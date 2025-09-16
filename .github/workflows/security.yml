@@ -236,7 +236,7 @@ jobs:
 
           echo "## Security Checks" >> "$GITHUB_STEP_SUMMARY"
           for i in "${!names[@]}"; do
-            printf "- %s: %s\n" "${names[$i]}" "${results[$i]}" >> "$GITHUB_STEP_SUMMARY"
+            printf -- "- %s: %s\n" "${names[$i]}" "${results[$i]}" >> "$GITHUB_STEP_SUMMARY"
           done
 
           if [[ "${passed}" != true ]]; then
