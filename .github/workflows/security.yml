@@ -189,7 +189,7 @@ jobs:
           fetch-depth: 0  # Scorecard needs full git history for proper analysis
 
       - name: Run Scorecard analysis
-        uses: ossf/scorecard-action@v2.3.1
+        uses: ossf/scorecard-action@v2.5.0
         with:
           results_file: scorecard-results.sarif
           results_format: sarif

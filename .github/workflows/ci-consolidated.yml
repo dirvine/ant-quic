@@ -151,8 +151,9 @@ jobs:
             -- --test-threads=1
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./cobertura.xml
           flags: unittests
           name: codecov-umbrella
