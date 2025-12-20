@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,326 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="core-components"><a class="header" href="#core-components">Core Components</a></h1>
+<p>This page describes the core components of ant-quic’s architecture.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<pre><code>                                                         
+                   P2pEndpoint                           
+  (Primary API - symmetric P2P operations)               
+                                                         $
+  P2pConfig      NatConfig      PqcConfig  MtuConfig  
+  (builder)      (NAT tuning)   (PQC tune) (MTU tune) 
+               4               4            4            $
+                   Core QUIC                             
+  Endpoint  Connection  Streams  Frames  Crypto     
+                                                         
+</code></pre>
+<h2 id="p2pendpoint"><a class="header" href="#p2pendpoint">P2pEndpoint</a></h2>
+<p>The primary user-facing API for P2P networking.</p>
+<h3 id="responsibilities"><a class="header" href="#responsibilities">Responsibilities</a></h3>
+<ul>
+<li>Connection management (connect and accept)</li>
+<li>Address discovery coordination</li>
+<li>NAT traversal orchestration</li>
+<li>Event emission</li>
+<li>Statistics collection</li>
+</ul>
+<h3 id="key-methods"><a class="header" href="#key-methods">Key Methods</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::{P2pEndpoint, P2pConfig};
+
+// Create endpoint
+let endpoint = P2pEndpoint::new(config).await?;
+
+// Identity
+let peer_id = endpoint.peer_id();
+
+// Address discovery
+endpoint.connect_bootstrap().await?;
+let external = endpoint.external_address();
+
+// Connections
+let conn = endpoint.connect(addr).await?;
+let incoming = endpoint.accept().await;
+
+// Events
+let events = endpoint.subscribe();
+
+// Statistics
+let stats = endpoint.stats();
+<span class="boring">}</span></code></pre>
+<h3 id="symmetric-design"><a class="header" href="#symmetric-design">Symmetric Design</a></h3>
+<p>Every P2pEndpoint can:</p>
+<ul>
+<li><strong>Initiate</strong> connections to other peers</li>
+<li><strong>Accept</strong> connections from other peers</li>
+<li><strong>Observe</strong> external addresses of connecting peers</li>
+<li><strong>Coordinate</strong> NAT traversal for other peers</li>
+</ul>
+<p>There are no special roles - all nodes are identical.</p>
+<h2 id="p2pconfig"><a class="header" href="#p2pconfig">P2pConfig</a></h2>
+<p>Configuration builder for P2pEndpoint.</p>
+<h3 id="structure"><a class="header" href="#structure">Structure</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>P2pConfig::builder()
+    // Network
+    .bind_addr(SocketAddr)
+    .known_peer(SocketAddr)
+
+    // Components
+    .nat(NatConfig)
+    .pqc(PqcConfig)
+    .mtu(MtuConfig)
+
+    // Limits
+    .max_connections(usize)
+    .connection_timeout(Duration)
+    .idle_timeout(Duration)
+
+    .build()
+<span class="boring">}</span></code></pre>
+<h2 id="natconfig"><a class="header" href="#natconfig">NatConfig</a></h2>
+<p>NAT traversal configuration.</p>
+<h3 id="fields"><a class="header" href="#fields">Fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>max_candidates</code></td><td><code>usize</code></td><td>Maximum address candidates</td></tr>
+<tr><td><code>coordination_timeout</code></td><td><code>Duration</code></td><td>Hole punch coordination timeout</td></tr>
+<tr><td><code>discovery_timeout</code></td><td><code>Duration</code></td><td>Candidate discovery timeout</td></tr>
+<tr><td><code>enable_symmetric_nat</code></td><td><code>bool</code></td><td>Enable port prediction</td></tr>
+<tr><td><code>hole_punch_retries</code></td><td><code>u32</code></td><td>Number of punch attempts</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="usage"><a class="header" href="#usage">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let nat = NatConfig {
+    max_candidates: 10,
+    coordination_timeout: Duration::from_secs(15),
+    discovery_timeout: Duration::from_secs(5),
+    enable_symmetric_nat: true,
+    hole_punch_retries: 5,
+    ..Default::default()
+};
+<span class="boring">}</span></code></pre>
+<h2 id="pqcconfig"><a class="header" href="#pqcconfig">PqcConfig</a></h2>
+<p>Post-quantum cryptography configuration. Note: PQC cannot be disabled.</p>
+<h3 id="fields-1"><a class="header" href="#fields-1">Fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ml_kem</code></td><td><code>bool</code></td><td>Enable ML-KEM-768</td></tr>
+<tr><td><code>ml_dsa</code></td><td><code>bool</code></td><td>Enable ML-DSA-65</td></tr>
+<tr><td><code>memory_pool_size</code></td><td><code>usize</code></td><td>Key operation buffers</td></tr>
+<tr><td><code>handshake_timeout_multiplier</code></td><td><code>f64</code></td><td>Timeout adjustment</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="usage-1"><a class="header" href="#usage-1">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let pqc = PqcConfig::builder()
+    .ml_kem(true)
+    .ml_dsa(true)
+    .memory_pool_size(10)
+    .handshake_timeout_multiplier(1.5)
+    .build()?;
+<span class="boring">}</span></code></pre>
+<h2 id="mtuconfig"><a class="header" href="#mtuconfig">MtuConfig</a></h2>
+<p>MTU configuration for PQC overhead.</p>
+<h3 id="fields-2"><a class="header" href="#fields-2">Fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>initial</code></td><td><code>u16</code></td><td>Initial MTU</td></tr>
+<tr><td><code>min</code></td><td><code>u16</code></td><td>Minimum MTU</td></tr>
+<tr><td><code>max</code></td><td><code>u16</code></td><td>Maximum MTU</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="usage-2"><a class="header" href="#usage-2">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mtu = MtuConfig {
+    initial: 1200,
+    min: 1200,
+    max: 1500,
+};
+<span class="boring">}</span></code></pre>
+<h2 id="connection"><a class="header" href="#connection">Connection</a></h2>
+<p>A QUIC connection between two peers.</p>
+<h3 id="capabilities"><a class="header" href="#capabilities">Capabilities</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Open streams
+let (send, recv) = connection.open_bi().await?;
+let send = connection.open_uni().await?;
+
+// Accept streams
+let (send, recv) = connection.accept_bi().await?;
+let recv = connection.accept_uni().await?;
+
+// Stream operations
+send.write_all(data).await?;
+send.finish()?;
+let data = recv.read_to_end(limit).await?;
+
+// Connection management
+connection.close(code, reason).await;
+let closed = connection.is_closed();
+<span class="boring">}</span></code></pre>
+<h2 id="peerid"><a class="header" href="#peerid">PeerId</a></h2>
+<p>Unique peer identifier derived from Ed25519 public key.</p>
+<h3 id="operations"><a class="header" href="#operations">Operations</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::PeerId;
+
+// Create from hex
+let peer_id = PeerId::from_hex("abcd1234...")?;
+
+// Convert to hex
+let hex = peer_id.to_hex();
+
+// Get bytes
+let bytes = peer_id.as_bytes();
+<span class="boring">}</span></code></pre>
+<h2 id="p2pevent"><a class="header" href="#p2pevent">P2pEvent</a></h2>
+<p>Events emitted by the endpoint.</p>
+<h3 id="variants"><a class="header" href="#variants">Variants</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum P2pEvent {
+    // Connection lifecycle
+    Connected { peer_id: PeerId, addr: SocketAddr },
+    Disconnected { peer_id: PeerId, reason: String },
+    ConnectionFailed { peer_id: PeerId, reason: String },
+
+    // Address discovery
+    AddressDiscovered { addr: SocketAddr },
+    AddressChanged { old: SocketAddr, new: SocketAddr },
+
+    // NAT traversal
+    HolePunchStarted { peer_id: PeerId },
+    HolePunchSucceeded { peer_id: PeerId, addr: SocketAddr },
+    HolePunchFailed { peer_id: PeerId, reason: String },
+
+    // Candidates
+    CandidatesDiscovered { peer_id: PeerId, count: usize },
+}
+<span class="boring">}</span></code></pre>
+<h3 id="usage-3"><a class="header" href="#usage-3">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mut events = endpoint.subscribe();
+while let Ok(event) = events.recv().await {
+    match event {
+        P2pEvent::Connected { peer_id, addr } =&gt; {
+            println!("Connected: {} at {}", peer_id.to_hex(), addr);
+        }
+        // Handle other events...
+        _ =&gt; {}
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="candidateaddress"><a class="header" href="#candidateaddress">CandidateAddress</a></h2>
+<p>Address candidate for NAT traversal.</p>
+<h3 id="structure-1"><a class="header" href="#structure-1">Structure</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct CandidateAddress {
+    pub addr: SocketAddr,
+    pub source: CandidateSource,
+    pub priority: u32,
+}
+
+pub enum CandidateSource {
+    Local,      // Interface address
+    Observed,   // OBSERVED_ADDRESS frame
+    Predicted,  // Symmetric NAT prediction
+}
+<span class="boring">}</span></code></pre>
+<h3 id="usage-4"><a class="header" href="#usage-4">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let candidates = endpoint.get_local_candidates();
+for c in candidates {
+    println!("{} from {:?} (priority {})", c.addr, c.source, c.priority);
+}
+<span class="boring">}</span></code></pre>
+<h2 id="endpointstats"><a class="header" href="#endpointstats">EndpointStats</a></h2>
+<p>Endpoint statistics.</p>
+<h3 id="fields-3"><a class="header" href="#fields-3">Fields</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct EndpointStats {
+    pub active_connections: usize,
+    pub discovered_addresses: usize,
+    pub successful_hole_punches: usize,
+    pub failed_hole_punches: usize,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+}
+<span class="boring">}</span></code></pre>
+<h3 id="usage-5"><a class="header" href="#usage-5">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let stats = endpoint.stats();
+println!("Active: {}", stats.active_connections);
+println!("Discovered: {}", stats.discovered_addresses);
+<span class="boring">}</span></code></pre>
+<h2 id="key-utilities"><a class="header" href="#key-utilities">Key Utilities</a></h2>
+<p>Functions for key management.</p>
+<h3 id="functions"><a class="header" href="#functions">Functions</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::key_utils::{
+    generate_ed25519_keypair,
+    derive_peer_id,
+};
+
+// Generate new keypair
+let (private_key, public_key) = generate_ed25519_keypair();
+
+// Derive peer ID
+let peer_id = derive_peer_id(&amp;public_key);
+<span class="boring">}</span></code></pre>
+<h2 id="component-interaction"><a class="header" href="#component-interaction">Component Interaction</a></h2>
+<pre><code class="language-mermaid">graph TD
+    App[Application] --&gt; P2pEndpoint
+    P2pEndpoint --&gt; Connection
+    P2pEndpoint --&gt; Events[P2pEvent]
+    P2pEndpoint --&gt; Stats[EndpointStats]
+
+    Connection --&gt; Streams
+    Streams --&gt; Send[SendStream]
+    Streams --&gt; Recv[RecvStream]
+
+    P2pConfig --&gt; P2pEndpoint
+    NatConfig --&gt; P2pConfig
+    PqcConfig --&gt; P2pConfig
+    MtuConfig --&gt; P2pConfig
+</code></pre>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./architecture.html">Architecture</a></li>
+<li><a href="./api-reference.html">API Reference</a></li>
+<li><a href="./configuration.html">Configuration</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

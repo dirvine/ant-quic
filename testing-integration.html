@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,252 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="integration-tests"><a class="header" href="#integration-tests">Integration Tests</a></h1>
+<p>Integration tests verify cross-component behavior and realistic usage scenarios.</p>
+<h2 id="organization"><a class="header" href="#organization">Organization</a></h2>
+<p>Integration tests are in the <code>tests/</code> directory:</p>
+<pre><code>tests/
+   nat_traversal_comprehensive.rs  # NAT traversal scenarios
+   connection_establishment.rs      # Connection lifecycle
+   address_discovery.rs             # Address discovery
+   pqc_integration.rs               # Post-quantum crypto
+   *.rs                             # Other tests
+</code></pre>
+<h2 id="running-integration-tests"><a class="header" href="#running-integration-tests">Running Integration Tests</a></h2>
+<pre><code class="language-bash"># All integration tests
+cargo test --test '*'
+
+# Specific test file
+cargo test --test nat_traversal_comprehensive
+
+# Specific test
+cargo test --test connection_establishment test_basic_connection
+
+# With logging
+RUST_LOG=ant_quic=debug cargo test --test nat_traversal_comprehensive -- --nocapture
+</code></pre>
+<h2 id="key-integration-tests"><a class="header" href="#key-integration-tests">Key Integration Tests</a></h2>
+<h3 id="connection-establishment"><a class="header" href="#connection-establishment">Connection Establishment</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// tests/connection_establishment.rs
+use ant_quic::{P2pEndpoint, P2pConfig};
+
+#[tokio::test]
+async fn test_basic_connection() {
+    // Create two endpoints
+    let config1 = P2pConfig::builder()
+        .bind_addr("127.0.0.1:0".parse().unwrap())
+        .build()
+        .unwrap();
+    let config2 = P2pConfig::builder()
+        .bind_addr("127.0.0.1:0".parse().unwrap())
+        .build()
+        .unwrap();
+
+    let ep1 = P2pEndpoint::new(config1).await.unwrap();
+    let ep2 = P2pEndpoint::new(config2).await.unwrap();
+
+    // Connect from ep1 to ep2
+    let conn = ep1.connect(ep2.local_addr()).await.unwrap();
+
+    assert!(!conn.is_closed());
+}
+<span class="boring">}</span></code></pre>
+<h3 id="bidirectional-streams"><a class="header" href="#bidirectional-streams">Bidirectional Streams</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[tokio::test]
+async fn test_bidirectional_stream() {
+    let (ep1, ep2) = create_pair().await;
+
+    // Connect
+    let conn = ep1.connect(ep2.local_addr()).await.unwrap();
+
+    // Open stream and send
+    let (mut send, mut recv) = conn.open_bi().await.unwrap();
+    send.write_all(b"Hello").await.unwrap();
+    send.finish().unwrap();
+
+    // Accept and receive on server side
+    let server_conn = ep2.accept().await.unwrap();
+    let (mut server_send, mut server_recv) = server_conn.accept_bi().await.unwrap();
+
+    let data = server_recv.read_to_end(1024).await.unwrap();
+    assert_eq!(&amp;data, b"Hello");
+}
+<span class="boring">}</span></code></pre>
+<h3 id="address-discovery"><a class="header" href="#address-discovery">Address Discovery</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[tokio::test]
+async fn test_address_discovery_via_peer() {
+    // Create a "known peer" with public binding
+    let known_peer = P2pEndpoint::new(
+        P2pConfig::builder()
+            .bind_addr("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap()
+    ).await.unwrap();
+
+    // Create client that will discover its address
+    let client = P2pEndpoint::new(
+        P2pConfig::builder()
+            .known_peer(known_peer.local_addr())
+            .build()
+            .unwrap()
+    ).await.unwrap();
+
+    // Connect to known peer
+    client.connect_bootstrap().await.unwrap();
+
+    // Should have discovered an address
+    assert!(client.external_address().is_some());
+}
+<span class="boring">}</span></code></pre>
+<h3 id="nat-traversal-simulation"><a class="header" href="#nat-traversal-simulation">NAT Traversal Simulation</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[tokio::test]
+async fn test_hole_punch_simulation() {
+    // Create coordinator
+    let coordinator = P2pEndpoint::new(
+        P2pConfig::builder()
+            .bind_addr("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap()
+    ).await.unwrap();
+
+    // Create two endpoints behind simulated NAT
+    let ep1 = P2pEndpoint::new(
+        P2pConfig::builder()
+            .known_peer(coordinator.local_addr())
+            .build()
+            .unwrap()
+    ).await.unwrap();
+
+    let ep2 = P2pEndpoint::new(
+        P2pConfig::builder()
+            .known_peer(coordinator.local_addr())
+            .build()
+            .unwrap()
+    ).await.unwrap();
+
+    // Both discover their addresses
+    ep1.connect_bootstrap().await.unwrap();
+    ep2.connect_bootstrap().await.unwrap();
+
+    // Exchange candidates and punch
+    // (in real scenario, this happens via coordinator)
+    let conn = ep1.connect(ep2.local_addr()).await.unwrap();
+    assert!(!conn.is_closed());
+}
+<span class="boring">}</span></code></pre>
+<h3 id="event-monitoring"><a class="header" href="#event-monitoring">Event Monitoring</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[tokio::test]
+async fn test_connection_events() {
+    let ep1 = create_endpoint().await;
+    let ep2 = create_endpoint().await;
+
+    let mut events1 = ep1.subscribe();
+
+    // Connect
+    let _conn = ep1.connect(ep2.local_addr()).await.unwrap();
+
+    // Should receive Connected event
+    let event = tokio::time::timeout(
+        Duration::from_secs(5),
+        events1.recv()
+    ).await.unwrap().unwrap();
+
+    matches!(event, P2pEvent::Connected { .. });
+}
+<span class="boring">}</span></code></pre>
+<h2 id="nat-simulation"><a class="header" href="#nat-simulation">NAT Simulation</a></h2>
+<p>The test suite includes NAT simulation for realistic scenarios:</p>
+<h3 id="nat-types"><a class="header" href="#nat-types">NAT Types</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>enum SimulatedNatType {
+    FullCone,         // Most permissive
+    RestrictedCone,   // Source IP restricted
+    PortRestricted,   // Source IP + port restricted
+    Symmetric,        // Different mapping per destination
+}
+<span class="boring">}</span></code></pre>
+<h3 id="multi-nat-test"><a class="header" href="#multi-nat-test">Multi-NAT Test</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[tokio::test]
+async fn test_symmetric_nat_traversal() {
+    let coordinator = create_public_endpoint().await;
+
+    let nat1 = SimulatedNat::new(SimulatedNatType::Symmetric);
+    let nat2 = SimulatedNat::new(SimulatedNatType::PortRestricted);
+
+    let ep1 = create_endpoint_behind_nat(&amp;nat1).await;
+    let ep2 = create_endpoint_behind_nat(&amp;nat2).await;
+
+    // Both connect to coordinator for address discovery
+    ep1.connect_via_nat(coordinator.local_addr()).await.unwrap();
+    ep2.connect_via_nat(coordinator.local_addr()).await.unwrap();
+
+    // Attempt hole punch (may fail for symmetric NAT)
+    let result = ep1.connect_with_hole_punch(ep2.peer_id()).await;
+
+    // Symmetric NAT to Port Restricted should succeed with prediction
+    assert!(result.is_ok());
+}
+<span class="boring">}</span></code></pre>
+<h2 id="docker-based-tests"><a class="header" href="#docker-based-tests">Docker-Based Tests</a></h2>
+<p>For realistic NAT testing, use Docker:</p>
+<pre><code class="language-bash"># Run Docker NAT simulation
+docker-compose -f docker/nat-test/docker-compose.yml up
+
+# Run tests against Docker network
+DOCKER_NAT_TEST=1 cargo test --test nat_traversal_comprehensive
+</code></pre>
+<h2 id="test-fixtures"><a class="header" href="#test-fixtures">Test Fixtures</a></h2>
+<h3 id="creating-endpoint-pairs"><a class="header" href="#creating-endpoint-pairs">Creating Endpoint Pairs</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>async fn create_pair() -&gt; (P2pEndpoint, P2pEndpoint) {
+    let config = || P2pConfig::builder()
+        .bind_addr("127.0.0.1:0".parse().unwrap())
+        .build()
+        .unwrap();
+
+    let ep1 = P2pEndpoint::new(config()).await.unwrap();
+    let ep2 = P2pEndpoint::new(config()).await.unwrap();
+
+    (ep1, ep2)
+}
+<span class="boring">}</span></code></pre>
+<h3 id="test-timeouts"><a class="header" href="#test-timeouts">Test Timeouts</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[tokio::test]
+async fn test_with_timeout() {
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        async {
+            // Test logic here
+        }
+    ).await;
+
+    assert!(result.is_ok(), "Test timed out");
+}
+<span class="boring">}</span></code></pre>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./testing.html">Testing Overview</a></li>
+<li><a href="./testing-unit.html">Unit Tests</a></li>
+<li><a href="./testing-property.html">Property Tests</a></li>
+<li><a href="../deployment/docker.html">Docker Testing</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

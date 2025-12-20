@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,307 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h1>
+<p>Common issues and solutions for ant-quic.</p>
+<h2 id="connection-issues"><a class="header" href="#connection-issues">Connection Issues</a></h2>
+<h3 id="cannot-connect-to-known-peers"><a class="header" href="#cannot-connect-to-known-peers">Cannot Connect to Known Peers</a></h3>
+<p><strong>Symptom</strong>: <code>connect_bootstrap()</code> times out or fails.</p>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li>
+<p><strong>Check network connectivity</strong>:</p>
+<pre><code class="language-bash">ping quic.saorsalabs.com
+nc -zvu quic.saorsalabs.com 9000
+</code></pre>
+</li>
+<li>
+<p><strong>Verify port is not blocked</strong>:</p>
+<pre><code class="language-bash"># Check firewall
+sudo ufw status
+sudo iptables -L -n
+</code></pre>
+</li>
+<li>
+<p><strong>Try multiple known peers</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let config = P2pConfig::builder()
+    .known_peer("peer1.example.com:9000".parse()?)
+    .known_peer("peer2.example.com:9000".parse()?)
+    .known_peer("peer3.example.com:9000".parse()?)
+    .build()?;
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Increase timeout</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let config = P2pConfig::builder()
+    .connection_timeout(Duration::from_secs(60))
+    .build()?;
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h3 id="connection-refused"><a class="header" href="#connection-refused">Connection Refused</a></h3>
+<p><strong>Symptom</strong>: Immediate connection failure.</p>
+<p><strong>Causes</strong>:</p>
+<ul>
+<li>Target not listening on the port</li>
+<li>Firewall blocking UDP</li>
+<li>Wrong address/port</li>
+</ul>
+<p><strong>Debug</strong>:</p>
+<pre><code class="language-bash">RUST_LOG=ant_quic::connection=debug cargo run
+</code></pre>
+<h3 id="handshake-timeout"><a class="header" href="#handshake-timeout">Handshake Timeout</a></h3>
+<p><strong>Symptom</strong>: Connection starts but times out during handshake.</p>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li>
+<p><strong>Allow more time for PQC handshake</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let pqc = PqcConfig::builder()
+    .handshake_timeout_multiplier(2.0)
+    .build()?;
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Check MTU issues</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mtu = MtuConfig {
+    initial: 1200,
+    min: 1200,
+    max: 1280, // Conservative
+};
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h2 id="nat-traversal-issues"><a class="header" href="#nat-traversal-issues">NAT Traversal Issues</a></h2>
+<h3 id="no-external-address-discovered"><a class="header" href="#no-external-address-discovered">No External Address Discovered</a></h3>
+<p><strong>Symptom</strong>: <code>external_address()</code> returns <code>None</code>.</p>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li>
+<p><strong>Ensure connected to known peer first</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>endpoint.connect_bootstrap().await?;
+let addr = endpoint.external_address();
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Subscribe to events to see what’s happening</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mut events = endpoint.subscribe();
+while let Ok(event) = events.recv().await {
+    match event {
+        P2pEvent::AddressDiscovered { addr } =&gt; {
+            println!("Discovered: {}", addr);
+        }
+        P2pEvent::ConnectionFailed { reason, .. } =&gt; {
+            println!("Failed: {}", reason);
+        }
+        _ =&gt; {}
+    }
+}
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h3 id="hole-punch-always-fails"><a class="header" href="#hole-punch-always-fails">Hole Punch Always Fails</a></h3>
+<p><strong>Symptom</strong>: <code>HolePunchFailed</code> events for all attempts.</p>
+<p><strong>Causes</strong>:</p>
+<ul>
+<li>Both peers behind symmetric NAT</li>
+<li>Firewall blocking UDP</li>
+<li>Network doesn’t support hole punching</li>
+</ul>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li>
+<p><strong>Check NAT type</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let candidates = endpoint.get_local_candidates();
+for c in candidates {
+    println!("{:?}: {}", c.source, c.addr);
+}
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Enable symmetric NAT support</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let nat = NatConfig {
+    enable_symmetric_nat: true,
+    hole_punch_retries: 10,
+    ..Default::default()
+};
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Use relay (if available)</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Connect via a peer with public IP
+endpoint.connect_via_peer(peer_id, relay_addr).await?;
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h3 id="candidates-not-found"><a class="header" href="#candidates-not-found">Candidates Not Found</a></h3>
+<p><strong>Symptom</strong>: <code>get_local_candidates()</code> returns empty.</p>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li>
+<p><strong>Wait for discovery</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>endpoint.connect_bootstrap().await?;
+tokio::time::sleep(Duration::from_secs(2)).await;
+let candidates = endpoint.get_local_candidates();
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Increase candidate limit</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let nat = NatConfig {
+    max_candidates: 20,
+    discovery_timeout: Duration::from_secs(10),
+    ..Default::default()
+};
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h2 id="crypto-issues"><a class="header" href="#crypto-issues">Crypto Issues</a></h2>
+<h3 id="pqc-handshake-failure"><a class="header" href="#pqc-handshake-failure">PQC Handshake Failure</a></h3>
+<p><strong>Symptom</strong>: Handshake fails with crypto error.</p>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li>
+<p><strong>Check both peers support PQC</strong> (all v0.13.0+ do)</p>
+</li>
+<li>
+<p><strong>Increase handshake timeout</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let pqc = PqcConfig::builder()
+    .handshake_timeout_multiplier(3.0)
+    .build()?;
+<span class="boring">}</span></code></pre>
+</li>
+<li>
+<p><strong>Check MTU for large PQC keys</strong>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mtu = MtuConfig {
+    initial: 1200,
+    min: 1200,
+    max: 1500,
+};
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h3 id="certificatekey-errors"><a class="header" href="#certificatekey-errors">Certificate/Key Errors</a></h3>
+<p><strong>Note</strong>: ant-quic uses Raw Public Keys (RFC 7250), not X.509 certificates.</p>
+<p><strong>Symptom</strong>: Key validation fails.</p>
+<p><strong>Solutions</strong>:</p>
+<ol>
+<li><strong>Verify key generation</strong>:
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::key_utils::{generate_ed25519_keypair, derive_peer_id};
+
+let (private, public) = generate_ed25519_keypair();
+let peer_id = derive_peer_id(&amp;public);
+println!("Generated: {}", peer_id.to_hex());
+<span class="boring">}</span></code></pre>
+</li>
+</ol>
+<h2 id="build-issues"><a class="header" href="#build-issues">Build Issues</a></h2>
+<h3 id="crypto-provider-conflicts"><a class="header" href="#crypto-provider-conflicts">Crypto Provider Conflicts</a></h3>
+<p><strong>Symptom</strong>: Multiple crypto backends error.</p>
+<p><strong>Solution</strong>:</p>
+<pre><code class="language-toml"># Cargo.toml - use only one
+ant-quic = { version = "0.13", default-features = false, features = ["rustls-aws-lc-rs"] }
+</code></pre>
+<h3 id="aws-lc-build-failure"><a class="header" href="#aws-lc-build-failure">AWS-LC Build Failure</a></h3>
+<p><strong>Symptom</strong>: CMake or compiler errors.</p>
+<p><strong>Solution</strong>:</p>
+<pre><code class="language-bash"># Install dependencies
+# Ubuntu/Debian
+sudo apt install build-essential cmake
+
+# macOS
+xcode-select --install
+brew install cmake
+</code></pre>
+<h3 id="link-errors"><a class="header" href="#link-errors">Link Errors</a></h3>
+<p><strong>Symptom</strong>: Undefined symbols during linking.</p>
+<p><strong>Solution</strong>:</p>
+<pre><code class="language-bash">cargo clean
+cargo build
+</code></pre>
+<h2 id="logging-and-debugging"><a class="header" href="#logging-and-debugging">Logging and Debugging</a></h2>
+<h3 id="enable-debug-logging"><a class="header" href="#enable-debug-logging">Enable Debug Logging</a></h3>
+<pre><code class="language-bash"># Full debug
+RUST_LOG=ant_quic=debug cargo run
+
+# Specific modules
+RUST_LOG=ant_quic::nat_traversal=trace cargo run
+RUST_LOG=ant_quic::connection=debug cargo run
+RUST_LOG=ant_quic::crypto::pqc=debug cargo run
+</code></pre>
+<h3 id="capture-packet-traces"><a class="header" href="#capture-packet-traces">Capture Packet Traces</a></h3>
+<pre><code class="language-bash"># With tcpdump
+sudo tcpdump -i any -w capture.pcap udp port 9000
+
+# With Wireshark
+# Filter: udp.port == 9000
+</code></pre>
+<h3 id="network-simulation"><a class="header" href="#network-simulation">Network Simulation</a></h3>
+<p>Use Docker for controlled testing:</p>
+<pre><code class="language-bash">cd docker/nat-test
+docker-compose up
+</code></pre>
+<h2 id="common-error-messages"><a class="header" href="#common-error-messages">Common Error Messages</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Error</th><th>Cause</th><th>Solution</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ConnectionRefused</code></td><td>No listener at address</td><td>Verify target is running</td></tr>
+<tr><td><code>TimedOut</code></td><td>Network/firewall issue</td><td>Check connectivity</td></tr>
+<tr><td><code>HandshakeFailed</code></td><td>Crypto mismatch</td><td>Verify both peers are v0.13.0+</td></tr>
+<tr><td><code>NoViableCandidates</code></td><td>NAT too restrictive</td><td>Enable symmetric NAT support</td></tr>
+<tr><td><code>CoordinationTimeout</code></td><td>Slow coordination</td><td>Increase timeout</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="getting-help"><a class="header" href="#getting-help">Getting Help</a></h2>
+<ol>
+<li><strong>Enable verbose logging</strong> and capture output</li>
+<li><strong>Check platform support</strong> for your OS</li>
+<li><strong>File an issue</strong> at github.com/dirvine/ant-quic/issues</li>
+</ol>
+<p>Include:</p>
+<ul>
+<li>ant-quic version</li>
+<li>OS and version</li>
+<li>Rust version</li>
+<li>Debug log output</li>
+<li>Network topology (behind NAT? VPN?)</li>
+</ul>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./configuration.html">Configuration</a> - All options</li>
+<li><a href="./performance.html">Performance</a> - Tuning guide</li>
+<li><a href="./nat-traversal.html">NAT Traversal</a> - How NAT traversal works</li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

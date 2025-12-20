@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,225 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h1>
+<p>Unit tests verify individual components in isolation.</p>
+<h2 id="organization"><a class="header" href="#organization">Organization</a></h2>
+<p>Unit tests are embedded in source files:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// src/peer_id.rs
+pub struct PeerId([u8; 32]);
+
+impl PeerId {
+    pub fn from_hex(hex: &amp;str) -&gt; Result&lt;Self, Error&gt; {
+        // ...
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_hex_valid() {
+        let hex = "a".repeat(64);
+        assert!(PeerId::from_hex(&amp;hex).is_ok());
+    }
+
+    #[test]
+    fn test_from_hex_invalid_length() {
+        let hex = "abc";
+        assert!(PeerId::from_hex(hex).is_err());
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="running-unit-tests"><a class="header" href="#running-unit-tests">Running Unit Tests</a></h2>
+<pre><code class="language-bash"># All unit tests
+cargo test --lib
+
+# Specific module
+cargo test peer_id
+
+# Specific test
+cargo test test_from_hex_valid
+
+# With output
+cargo test --lib -- --nocapture
+</code></pre>
+<h2 id="key-test-modules"><a class="header" href="#key-test-modules">Key Test Modules</a></h2>
+<h3 id="peerid-tests"><a class="header" href="#peerid-tests">PeerId Tests</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod peer_id_tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_hex() {
+        let (_, public_key) = generate_ed25519_keypair();
+        let peer_id = derive_peer_id(&amp;public_key);
+
+        let hex = peer_id.to_hex();
+        let recovered = PeerId::from_hex(&amp;hex).unwrap();
+
+        assert_eq!(peer_id, recovered);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="configuration-tests"><a class="header" href="#configuration-tests">Configuration Tests</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn builder_defaults() {
+        let config = P2pConfig::builder().build().unwrap();
+
+        assert!(config.known_peers.is_empty());
+        assert_eq!(config.max_connections, 100);
+    }
+
+    #[test]
+    fn builder_with_known_peer() {
+        let addr = "192.168.1.1:9000".parse().unwrap();
+        let config = P2pConfig::builder()
+            .known_peer(addr)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.known_peers.len(), 1);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="frame-tests"><a class="header" href="#frame-tests">Frame Tests</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_add_address() {
+        let frame = AddAddressFrame {
+            sequence: 1,
+            addr: "192.168.1.1:9000".parse().unwrap(),
+        };
+
+        let mut buf = Vec::new();
+        frame.encode(&amp;mut buf);
+
+        let decoded = AddAddressFrame::decode(&amp;buf).unwrap();
+        assert_eq!(frame.sequence, decoded.sequence);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="candidate-tests"><a class="header" href="#candidate-tests">Candidate Tests</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod candidate_tests {
+    use super::*;
+
+    #[test]
+    fn priority_calculation() {
+        let local = CandidateAddress {
+            addr: "192.168.1.1:9000".parse().unwrap(),
+            source: CandidateSource::Local,
+            priority: 0,
+        };
+
+        let observed = CandidateAddress {
+            addr: "203.0.113.1:9000".parse().unwrap(),
+            source: CandidateSource::Observed,
+            priority: 0,
+        };
+
+        // Observed addresses should have higher priority
+        assert!(observed.calculate_priority() &gt; local.calculate_priority());
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="async-unit-tests"><a class="header" href="#async-unit-tests">Async Unit Tests</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod async_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn endpoint_creation() {
+        let config = P2pConfig::builder().build().unwrap();
+        let endpoint = P2pEndpoint::new(config).await;
+
+        assert!(endpoint.is_ok());
+    }
+
+    #[tokio::test]
+    async fn event_subscription() {
+        let config = P2pConfig::builder().build().unwrap();
+        let endpoint = P2pEndpoint::new(config).await.unwrap();
+
+        let events = endpoint.subscribe();
+        // Verify subscription works
+        drop(events);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="test-utilities"><a class="header" href="#test-utilities">Test Utilities</a></h2>
+<h3 id="test-helpers"><a class="header" href="#test-helpers">Test Helpers</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod test_helpers {
+    pub fn test_config() -&gt; P2pConfig {
+        P2pConfig::builder()
+            .bind_addr("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap()
+    }
+
+    pub fn random_peer_id() -&gt; PeerId {
+        let (_, pk) = generate_ed25519_keypair();
+        derive_peer_id(&amp;pk)
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="mock-implementations"><a class="header" href="#mock-implementations">Mock Implementations</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+struct MockConnection {
+    closed: bool,
+}
+
+#[cfg(test)]
+impl MockConnection {
+    fn new() -&gt; Self {
+        Self { closed: false }
+    }
+
+    fn close(&amp;mut self) {
+        self.closed = true;
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Test one thing per test</strong></li>
+<li><strong>Use descriptive test names</strong></li>
+<li><strong>Test edge cases and error paths</strong></li>
+<li><strong>Keep tests fast (&lt; 100ms each)</strong></li>
+<li><strong>Avoid network I/O in unit tests</strong></li>
+</ol>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./testing.html">Testing Overview</a></li>
+<li><a href="./testing-integration.html">Integration Tests</a></li>
+<li><a href="./testing-property.html">Property Tests</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

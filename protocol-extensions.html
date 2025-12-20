@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,194 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="protocol-extensions"><a class="header" href="#protocol-extensions">Protocol Extensions</a></h1>
+<p>ant-quic extends the QUIC protocol with custom frames and transport parameters for NAT traversal and address discovery.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>ant-quic implements two IETF drafts:</p>
+<ul>
+<li><strong>NAT Traversal</strong>: draft-seemann-quic-nat-traversal-02</li>
+<li><strong>Address Discovery</strong>: draft-ietf-quic-address-discovery-00</li>
+</ul>
+<p>These extensions use the QUIC extensibility mechanism:</p>
+<ul>
+<li>Custom transport parameters for capability negotiation</li>
+<li>Custom frame types for protocol messages</li>
+</ul>
+<h2 id="transport-parameters"><a class="header" href="#transport-parameters">Transport Parameters</a></h2>
+<p>Transport parameters are exchanged during the QUIC handshake to negotiate capabilities.</p>
+<h3 id="nat-traversal-parameters"><a class="header" href="#nat-traversal-parameters">NAT Traversal Parameters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter ID</th><th>Name</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>0x3d7e9f0bca12fea6</td><td>NAT Traversal Capability</td><td>Indicates NAT traversal support</td></tr>
+<tr><td>0x3d7e9f0bca12fea8</td><td>RFC-Compliant Frames</td><td>Indicates RFC-compliant frame format</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="address-discovery-parameters"><a class="header" href="#address-discovery-parameters">Address Discovery Parameters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter ID</th><th>Name</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>0x9f81a176</td><td>Address Discovery Config</td><td>Configuration for address observation</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="negotiation"><a class="header" href="#negotiation">Negotiation</a></h3>
+<p>Both endpoints must advertise support for NAT traversal in their transport parameters. If either endpoint doesn’t support it, NAT traversal is disabled for that connection.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Transport parameters are automatically negotiated
+// Check if NAT traversal is available:
+let nat_available = connection.nat_traversal_supported();
+<span class="boring">}</span></code></pre>
+<h2 id="extension-frames"><a class="header" href="#extension-frames">Extension Frames</a></h2>
+<h3 id="add_address-frame"><a class="header" href="#add_address-frame">ADD_ADDRESS Frame</a></h3>
+<p>Advertises a candidate address to the peer.</p>
+<p><strong>Frame Types:</strong></p>
+<ul>
+<li><code>0x3d7e90</code>: IPv4 address</li>
+<li><code>0x3d7e91</code>: IPv6 address</li>
+</ul>
+<p><strong>Format:</strong></p>
+<pre><code>ADD_ADDRESS Frame {
+    Address ID (i),
+    Sequence Number (i),
+    IP Address (32 or 128 bits),
+    Port (16 bits)
+}
+</code></pre>
+<p><strong>Fields:</strong></p>
+<ul>
+<li><code>Address ID</code>: Unique identifier for this address</li>
+<li><code>Sequence Number</code>: Monotonically increasing for conflict resolution</li>
+<li><code>IP Address</code>: IPv4 (4 bytes) or IPv6 (16 bytes) address</li>
+<li><code>Port</code>: UDP port number</li>
+</ul>
+<h3 id="punch_me_now-frame"><a class="header" href="#punch_me_now-frame">PUNCH_ME_NOW Frame</a></h3>
+<p>Coordinates simultaneous hole punching between two peers.</p>
+<p><strong>Frame Types:</strong></p>
+<ul>
+<li><code>0x3d7e92</code>: IPv4 target address</li>
+<li><code>0x3d7e93</code>: IPv6 target address</li>
+</ul>
+<p><strong>Format:</strong></p>
+<pre><code>PUNCH_ME_NOW Frame {
+    Coordination ID (i),
+    Target IP Address (32 or 128 bits),
+    Target Port (16 bits)
+}
+</code></pre>
+<p><strong>Fields:</strong></p>
+<ul>
+<li><code>Coordination ID</code>: Unique identifier for this punch attempt</li>
+<li><code>Target IP Address</code>: Address to send packets to</li>
+<li><code>Target Port</code>: Port to send packets to</li>
+</ul>
+<h3 id="remove_address-frame"><a class="header" href="#remove_address-frame">REMOVE_ADDRESS Frame</a></h3>
+<p>Removes a previously advertised address.</p>
+<p><strong>Frame Type:</strong> <code>0x3d7e94</code></p>
+<p><strong>Format:</strong></p>
+<pre><code>REMOVE_ADDRESS Frame {
+    Address ID (i),
+    Sequence Number (i)
+}
+</code></pre>
+<h3 id="observed_address-frame"><a class="header" href="#observed_address-frame">OBSERVED_ADDRESS Frame</a></h3>
+<p>Reports the external address observed by the peer.</p>
+<p><strong>Frame Types:</strong></p>
+<ul>
+<li><code>0x9f81a6</code>: IPv4 address</li>
+<li><code>0x9f81a7</code>: IPv6 address</li>
+</ul>
+<p><strong>Format:</strong></p>
+<pre><code>OBSERVED_ADDRESS Frame {
+    IP Address (32 or 128 bits),
+    Port (16 bits)
+}
+</code></pre>
+<p>This is how address discovery works - when you connect to a peer, they see your source address and send it back to you.</p>
+<h2 id="frame-processing"><a class="header" href="#frame-processing">Frame Processing</a></h2>
+<h3 id="sending-frames"><a class="header" href="#sending-frames">Sending Frames</a></h3>
+<p>Frames are sent through the standard QUIC connection:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Internal: frames are sent automatically
+// ADD_ADDRESS when discovering candidates
+// PUNCH_ME_NOW when coordinating hole punch
+// OBSERVED_ADDRESS on incoming connections
+<span class="boring">}</span></code></pre>
+<h3 id="receiving-frames"><a class="header" href="#receiving-frames">Receiving Frames</a></h3>
+<p>The endpoint processes extension frames automatically:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Subscribe to events for frame outcomes
+let mut events = endpoint.subscribe();
+while let Ok(event) = events.recv().await {
+    match event {
+        P2pEvent::AddressDiscovered { addr } =&gt; {
+            // Received OBSERVED_ADDRESS
+        }
+        P2pEvent::CandidatesDiscovered { peer_id, count } =&gt; {
+            // Received ADD_ADDRESS frames
+        }
+        _ =&gt; {}
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="variable-length-integer-encoding"><a class="header" href="#variable-length-integer-encoding">Variable-Length Integer Encoding</a></h2>
+<p>Frame fields marked with <code>(i)</code> use QUIC’s variable-length integer encoding:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>2MSB</th><th>Length</th><th>Usable Bits</th><th>Range</th></tr>
+</thead>
+<tbody>
+<tr><td>00</td><td>1 byte</td><td>6 bits</td><td>0-63</td></tr>
+<tr><td>01</td><td>2 bytes</td><td>14 bits</td><td>0-16383</td></tr>
+<tr><td>10</td><td>4 bytes</td><td>30 bits</td><td>0-1073741823</td></tr>
+<tr><td>11</td><td>8 bytes</td><td>62 bits</td><td>0-4611686018427387903</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<h3 id="frame-validation"><a class="header" href="#frame-validation">Frame Validation</a></h3>
+<p>All extension frames are validated:</p>
+<ul>
+<li>Address IDs must be unique</li>
+<li>Sequence numbers must be monotonically increasing</li>
+<li>IP addresses are checked for validity</li>
+<li>Rate limiting prevents flooding</li>
+</ul>
+<h3 id="authentication"><a class="header" href="#authentication">Authentication</a></h3>
+<p>Extension frames are only processed from authenticated peers. Since ant-quic uses Raw Public Keys (RFC 7250), peer identity is verified during the QUIC handshake.</p>
+<h3 id="encryption"><a class="header" href="#encryption">Encryption</a></h3>
+<p>All frames are encrypted using QUIC’s encryption. In v0.13.0+, this includes hybrid PQC (ML-KEM-768).</p>
+<h2 id="implementation-details"><a class="header" href="#implementation-details">Implementation Details</a></h2>
+<h3 id="frame-ids"><a class="header" href="#frame-ids">Frame IDs</a></h3>
+<p>The frame IDs follow QUIC’s extensibility rules:</p>
+<ul>
+<li>Use the experimental range to avoid conflicts</li>
+<li>Include versioning for future compatibility</li>
+</ul>
+<h3 id="compatibility"><a class="header" href="#compatibility">Compatibility</a></h3>
+<p>ant-quic’s extension frames are backward compatible:</p>
+<ul>
+<li>Peers that don’t understand extensions ignore them</li>
+<li>Transport parameters negotiate capability</li>
+</ul>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9000">RFC 9000</a> - QUIC Transport Protocol</li>
+<li><a href="../../rfcs/draft-seemann-quic-nat-traversal-02.txt">draft-seemann-quic-nat-traversal-02</a></li>
+<li><a href="../../rfcs/draft-ietf-quic-address-discovery-00.txt">draft-ietf-quic-address-discovery-00</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

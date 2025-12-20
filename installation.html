@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -180,7 +180,7 @@
                         <h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
 <h2 id="requirements"><a class="header" href="#requirements">Requirements</a></h2>
 <h3 id="minimum-rust-version"><a class="header" href="#minimum-rust-version">Minimum Rust Version</a></h3>
-<p>ant-quic requires Rust 1.85.0 or later.</p>
+<p>ant-quic requires <strong>Rust 1.85.0</strong> or later (Rust Edition 2024).</p>
 <h3 id="platform-requirements"><a class="header" href="#platform-requirements">Platform Requirements</a></h3>
 <div class="table-wrapper">
 <table>
@@ -188,41 +188,161 @@
 <tr><th>Platform</th><th>Requirements</th></tr>
 </thead>
 <tbody>
-<tr><td>Linux</td><td>glibc 2.17+</td></tr>
+<tr><td>Linux</td><td>glibc 2.17+, kernel 3.10+</td></tr>
 <tr><td>Windows</td><td>Windows 10+</td></tr>
 <tr><td>macOS</td><td>macOS 10.13+</td></tr>
+<tr><td>Android</td><td>API level 21+</td></tr>
 </tbody>
 </table>
 </div>
+<p><strong>Note</strong>: WASM is not supported. ant-quic uses raw UDP sockets and NAT traversal which are incompatible with the browser sandbox environment.</p>
 <h2 id="installing-from-cratesio"><a class="header" href="#installing-from-cratesio">Installing from crates.io</a></h2>
 <p>Add ant-quic to your project:</p>
 <pre><code class="language-bash">cargo add ant-quic
 </code></pre>
 <p>Or manually add to <code>Cargo.toml</code>:</p>
 <pre><code class="language-toml">[dependencies]
-ant-quic = "0.4"
+ant-quic = "0.13"
+tokio = { version = "1", features = ["full"] }
 </code></pre>
 <h2 id="feature-flags"><a class="header" href="#feature-flags">Feature Flags</a></h2>
 <p>ant-quic supports various feature flags:</p>
-<ul>
-<li><code>rustls-ring</code> (default): Use ring for cryptography</li>
-<li><code>rustls-aws-lc-rs</code>: Use AWS-LC for cryptography</li>
-<li><code>trace</code>: Enable tracing functionality</li>
-<li><code>test-utils</code>: Testing utilities</li>
-</ul>
-<p>Example with specific features:</p>
-<pre><code class="language-toml">[dependencies]
-ant-quic = { version = "0.4", features = ["rustls-aws-lc-rs", "trace"] }
+<h3 id="cryptography-providers"><a class="header" href="#cryptography-providers">Cryptography Providers</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>rustls-ring</code></td><td>Use ring for cryptography (default)</td></tr>
+<tr><td><code>rustls-aws-lc-rs</code></td><td>Use AWS-LC for cryptography (recommended for PQC)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="development-features"><a class="header" href="#development-features">Development Features</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trace</code></td><td>Enable tracing functionality</td></tr>
+<tr><td><code>test-utils</code></td><td>Testing utilities</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="example-configurations"><a class="header" href="#example-configurations">Example Configurations</a></h3>
+<pre><code class="language-toml"># Default (ring crypto)
+[dependencies]
+ant-quic = "0.13"
+
+# AWS-LC crypto (better PQC performance)
+[dependencies]
+ant-quic = { version = "0.13", default-features = false, features = ["rustls-aws-lc-rs"] }
+
+# With tracing
+[dependencies]
+ant-quic = { version = "0.13", features = ["trace"] }
 </code></pre>
+<h2 id="post-quantum-cryptography"><a class="header" href="#post-quantum-cryptography">Post-Quantum Cryptography</a></h2>
+<p>PQC is <strong>always enabled</strong> in ant-quic v0.13.0+. Every connection uses:</p>
+<ul>
+<li><strong>ML-KEM-768</strong> for key encapsulation (FIPS 203)</li>
+<li><strong>ML-DSA-65</strong> for digital signatures (FIPS 204)</li>
+</ul>
+<p>These are combined with classical algorithms (X25519, Ed25519) in a hybrid scheme. There is no way to disable PQC.</p>
+<h3 id="pqc-performance-considerations"><a class="header" href="#pqc-performance-considerations">PQC Performance Considerations</a></h3>
+<p>PQC algorithms have larger key and signature sizes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>Classical</th><th>Post-Quantum</th></tr>
+</thead>
+<tbody>
+<tr><td>Public Key (KEM)</td><td>32 bytes</td><td>1,184 bytes</td></tr>
+<tr><td>Ciphertext</td><td>32 bytes</td><td>1,088 bytes</td></tr>
+<tr><td>Public Key (Sig)</td><td>32 bytes</td><td>1,952 bytes</td></tr>
+<tr><td>Signature</td><td>64 bytes</td><td>3,293 bytes</td></tr>
+</tbody>
+</table>
+</div>
+<p>This affects handshake size and latency. The <code>aws-lc-rs</code> feature provides optimized implementations.</p>
 <h2 id="building-from-source"><a class="header" href="#building-from-source">Building from Source</a></h2>
 <pre><code class="language-bash">git clone https://github.com/dirvine/ant-quic
 cd ant-quic
 cargo build --release
 </code></pre>
-<h2 id="running-the-binary"><a class="header" href="#running-the-binary">Running the Binary</a></h2>
-<p>ant-quic includes a binary for testing:</p>
-<pre><code class="language-bash">cargo run --bin ant-quic -- --help
+<h3 id="development-build"><a class="header" href="#development-build">Development Build</a></h3>
+<pre><code class="language-bash"># Quick build for development
+cargo build
+
+# Build with all checks
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+cargo test
 </code></pre>
+<h2 id="running-the-binary"><a class="header" href="#running-the-binary">Running the Binary</a></h2>
+<p>ant-quic includes a binary for P2P networking:</p>
+<pre><code class="language-bash"># Show help
+cargo run --bin ant-quic -- --help
+
+# Start a node
+cargo run --bin ant-quic -- --listen 0.0.0.0:9000
+
+# Connect to known peers
+cargo run --bin ant-quic -- --bootstrap quic.saorsalabs.com:9000
+
+# Run with dashboard
+cargo run --bin ant-quic -- --dashboard --listen 0.0.0.0:9000
+</code></pre>
+<h2 id="verifying-installation"><a class="header" href="#verifying-installation">Verifying Installation</a></h2>
+<p>Create a test file to verify everything works:</p>
+<pre class="playground"><code class="language-rust">// src/main.rs
+use ant_quic::{P2pEndpoint, P2pConfig};
+
+#[tokio::main]
+async fn main() -&gt; anyhow::Result&lt;()&gt; {
+    let config = P2pConfig::builder().build()?;
+    let endpoint = P2pEndpoint::new(config).await?;
+
+    println!("ant-quic v0.13.0 installed successfully!");
+    println!("Peer ID: {}", endpoint.peer_id().to_hex());
+
+    Ok(())
+}</code></pre>
+<p>Run:</p>
+<pre><code class="language-bash">cargo run
+</code></pre>
+<h2 id="troubleshooting-installation"><a class="header" href="#troubleshooting-installation">Troubleshooting Installation</a></h2>
+<h3 id="crypto-provider-conflicts"><a class="header" href="#crypto-provider-conflicts">Crypto Provider Conflicts</a></h3>
+<p>If you get errors about multiple crypto providers:</p>
+<pre><code class="language-toml"># Use only one crypto backend
+ant-quic = { version = "0.13", default-features = false, features = ["rustls-aws-lc-rs"] }
+</code></pre>
+<h3 id="aws-lc-build-failures"><a class="header" href="#aws-lc-build-failures">AWS-LC Build Failures</a></h3>
+<p>AWS-LC requires a C compiler and CMake. Install them:</p>
+<pre><code class="language-bash"># Ubuntu/Debian
+sudo apt install build-essential cmake
+
+# macOS
+xcode-select --install
+brew install cmake
+
+# Windows
+# Install Visual Studio Build Tools and CMake
+</code></pre>
+<h3 id="link-errors"><a class="header" href="#link-errors">Link Errors</a></h3>
+<p>If you see link errors with ring:</p>
+<pre><code class="language-bash"># Clear build cache
+cargo clean
+cargo build
+</code></pre>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./getting-started.html">Getting Started</a> - First steps with ant-quic</li>
+<li><a href="./quick-start.html">Quick Start</a> - Build your first application</li>
+<li><a href="./platform-support.html">Platform Support</a> - Detailed platform information</li>
+</ul>
 
                     </main>
 

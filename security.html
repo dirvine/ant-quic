@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,247 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="security"><a class="header" href="#security">Security</a></h1>
+<p>ant-quic v0.13.0+ provides comprehensive security through always-on Post-Quantum Cryptography and Raw Public Key authentication.</p>
+<h2 id="security-model"><a class="header" href="#security-model">Security Model</a></h2>
+<h3 id="always-on-pqc"><a class="header" href="#always-on-pqc">Always-On PQC</a></h3>
+<p><strong>Every connection uses hybrid cryptography</strong> - there is no way to disable PQC:</p>
+<pre><code>                                       
+   Classical            Post-Quantum   
+                 $                      $
+    X25519         +     ML-KEM-768     = Hybrid Key Exchange
+    Ed25519        +     ML-DSA-65      = Hybrid Signatures
+                                       
+</code></pre>
+<p><strong>Security Property</strong>: An attacker must break BOTH algorithm families to compromise security.</p>
+<h3 id="why-always-on"><a class="header" href="#why-always-on">Why Always-On?</a></h3>
+<ol>
+<li><strong>“Harvest Now, Decrypt Later”</strong>: Adversaries can record encrypted traffic today and decrypt when quantum computers arrive</li>
+<li><strong>No Configuration Errors</strong>: Users cannot accidentally disable PQC</li>
+<li><strong>Consistent Security</strong>: Every connection has identical protection</li>
+<li><strong>Performance</strong>: Modern hardware handles ~8% overhead easily</li>
+</ol>
+<h2 id="cryptographic-algorithms"><a class="header" href="#cryptographic-algorithms">Cryptographic Algorithms</a></h2>
+<h3 id="key-exchange"><a class="header" href="#key-exchange">Key Exchange</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Algorithm</th><th>Standard</th><th>Security Level</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>X25519</td><td>RFC 7748</td><td>128-bit classical</td><td>Elliptic curve DH</td></tr>
+<tr><td>ML-KEM-768</td><td>FIPS 203</td><td>192-bit classical, 175-bit quantum</td><td>Post-quantum KEM</td></tr>
+</tbody>
+</table>
+</div>
+<p>Both are used together - the shared secret combines both results.</p>
+<h3 id="digital-signatures"><a class="header" href="#digital-signatures">Digital Signatures</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Algorithm</th><th>Standard</th><th>Security Level</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Ed25519</td><td>RFC 8032</td><td>128-bit classical</td><td>Classical signatures</td></tr>
+<tr><td>ML-DSA-65</td><td>FIPS 204</td><td>192-bit classical, 175-bit quantum</td><td>Post-quantum signatures</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="key-sizes"><a class="header" href="#key-sizes">Key Sizes</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>ML-KEM-768</th><th>X25519</th></tr>
+</thead>
+<tbody>
+<tr><td>Public Key</td><td>1,184 bytes</td><td>32 bytes</td></tr>
+<tr><td>Ciphertext</td><td>1,088 bytes</td><td>32 bytes</td></tr>
+</tbody>
+</table>
+</div>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>ML-DSA-65</th><th>Ed25519</th></tr>
+</thead>
+<tbody>
+<tr><td>Public Key</td><td>1,952 bytes</td><td>32 bytes</td></tr>
+<tr><td>Signature</td><td>3,293 bytes</td><td>64 bytes</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="raw-public-keys"><a class="header" href="#raw-public-keys">Raw Public Keys</a></h2>
+<p>ant-quic uses Raw Public Keys (RFC 7250) instead of X.509 certificates:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::key_utils::{generate_ed25519_keypair, derive_peer_id};
+
+// Generate Ed25519 keypair
+let (private_key, public_key) = generate_ed25519_keypair();
+
+// Derive peer ID from public key
+let peer_id = derive_peer_id(&amp;public_key);
+<span class="boring">}</span></code></pre>
+<h3 id="benefits"><a class="header" href="#benefits">Benefits</a></h3>
+<ol>
+<li><strong>No PKI Required</strong>: No certificate authorities needed</li>
+<li><strong>Self-Sovereign Identity</strong>: Nodes control their own keys</li>
+<li><strong>Simple Trust Model</strong>: Trust is established by knowing peer IDs</li>
+<li><strong>Small Footprint</strong>: No certificate chain overhead</li>
+</ol>
+<h3 id="peer-verification"><a class="header" href="#peer-verification">Peer Verification</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Verify a peer by their known ID
+let expected_peer_id = PeerId::from_hex("abcd1234...")?;
+
+endpoint.subscribe().recv().await {
+    P2pEvent::Connected { peer_id, .. } =&gt; {
+        if peer_id == expected_peer_id {
+            // Trusted peer
+        } else {
+            // Unknown peer
+        }
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="transport-security"><a class="header" href="#transport-security">Transport Security</a></h2>
+<p>All QUIC traffic is encrypted using AEAD:</p>
+<ul>
+<li><strong>Handshake</strong>: TLS 1.3 with hybrid PQC key exchange</li>
+<li><strong>Application Data</strong>: AES-128-GCM or ChaCha20-Poly1305</li>
+<li><strong>Header Protection</strong>: Additional header encryption</li>
+</ul>
+<h3 id="forward-secrecy"><a class="header" href="#forward-secrecy">Forward Secrecy</a></h3>
+<p>Ephemeral keys are used for each connection:</p>
+<ul>
+<li>New X25519 keypair per connection</li>
+<li>New ML-KEM-768 keypair per connection</li>
+<li>Compromise of one connection doesn’t affect others</li>
+</ul>
+<h2 id="threat-model"><a class="header" href="#threat-model">Threat Model</a></h2>
+<h3 id="protected-against"><a class="header" href="#protected-against">Protected Against</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Threat</th><th>Protection</th></tr>
+</thead>
+<tbody>
+<tr><td>Eavesdropping</td><td>TLS 1.3 encryption</td></tr>
+<tr><td>Man-in-the-Middle</td><td>Peer authentication</td></tr>
+<tr><td>Replay Attacks</td><td>QUIC nonces</td></tr>
+<tr><td>Quantum Computers</td><td>ML-KEM-768 + ML-DSA-65</td></tr>
+<tr><td>Key Compromise</td><td>Forward secrecy</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="attack-scenarios"><a class="header" href="#attack-scenarios">Attack Scenarios</a></h3>
+<h4 id="if-classical-algorithm-compromised"><a class="header" href="#if-classical-algorithm-compromised">If Classical Algorithm Compromised</a></h4>
+<ul>
+<li><strong>Impact</strong>: Limited - PQC still protects</li>
+<li><strong>Action</strong>: Continue operating, await updates</li>
+</ul>
+<h4 id="if-pqc-algorithm-compromised"><a class="header" href="#if-pqc-algorithm-compromised">If PQC Algorithm Compromised</a></h4>
+<ul>
+<li><strong>Impact</strong>: Limited - classical still protects</li>
+<li><strong>Action</strong>: Continue operating, await updates</li>
+</ul>
+<h4 id="if-both-compromised-unlikely"><a class="header" href="#if-both-compromised-unlikely">If Both Compromised (Unlikely)</a></h4>
+<ul>
+<li><strong>Impact</strong>: Critical</li>
+<li><strong>Action</strong>: Emergency key rotation</li>
+</ul>
+<h2 id="side-channel-protection"><a class="header" href="#side-channel-protection">Side-Channel Protection</a></h2>
+<p>ant-quic implements countermeasures:</p>
+<ol>
+<li><strong>Constant-Time Operations</strong>: No data-dependent branches</li>
+<li><strong>Memory Protection</strong>: Key zeroization after use</li>
+<li><strong>Stack Clearing</strong>: Sensitive variables cleared</li>
+</ol>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<h3 id="key-management"><a class="header" href="#key-management">Key Management</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// 1. Generate unique keypair per node
+let (private_key, public_key) = generate_ed25519_keypair();
+
+// 2. Store private key securely
+// Never log or expose private keys
+
+// 3. Rotate keys periodically for long-running services
+impl KeyRotation for YourApp {
+    fn should_rotate(&amp;self, key_age: Duration) -&gt; bool {
+        key_age &gt; Duration::from_days(90)
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="network-security"><a class="header" href="#network-security">Network Security</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// 1. Use multiple known peers
+let config = P2pConfig::builder()
+    .known_peer("peer1.example.com:9000".parse()?)
+    .known_peer("peer2.example.com:9000".parse()?)
+    .known_peer("peer3.example.com:9000".parse()?)
+    .build()?;
+
+// 2. Verify peer identities in your application
+// 3. Implement rate limiting for connections
+<span class="boring">}</span></code></pre>
+<h3 id="monitoring"><a class="header" href="#monitoring">Monitoring</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Monitor for security events
+let mut events = endpoint.subscribe();
+while let Ok(event) = events.recv().await {
+    match event {
+        P2pEvent::ConnectionFailed { peer_id, reason } =&gt; {
+            // Log failed connections
+            warn!("Connection failed: {} - {}", peer_id.to_hex(), reason);
+        }
+        _ =&gt; {}
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="compliance"><a class="header" href="#compliance">Compliance</a></h2>
+<h3 id="nist-standards"><a class="header" href="#nist-standards">NIST Standards</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Standard</th><th>Algorithm</th><th>Status</th></tr>
+</thead>
+<tbody>
+<tr><td>FIPS 203</td><td>ML-KEM-768</td><td>Final 2024</td></tr>
+<tr><td>FIPS 204</td><td>ML-DSA-65</td><td>Final 2024</td></tr>
+<tr><td>SP 800-56C Rev. 2</td><td>Key Derivation</td><td>Compliant</td></tr>
+<tr><td>SP 800-90A Rev. 1</td><td>RNG</td><td>Compliant</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="security-audit-checklist"><a class="header" href="#security-audit-checklist">Security Audit Checklist</a></h3>
+<ul>
+<li><input disabled="" type="checkbox" checked=""> PQC enabled (automatic - cannot be disabled)</li>
+<li><input disabled="" type="checkbox" checked=""> Hybrid mode active (automatic)</li>
+<li><input disabled="" type="checkbox"> Latest stable release installed</li>
+<li><input disabled="" type="checkbox"> Security advisories monitored</li>
+<li><input disabled="" type="checkbox"> Key rotation schedule implemented</li>
+<li><input disabled="" type="checkbox"> Peer verification in application</li>
+<li><input disabled="" type="checkbox"> Logging and monitoring active</li>
+</ul>
+<h2 id="reporting-security-issues"><a class="header" href="#reporting-security-issues">Reporting Security Issues</a></h2>
+<p>For security vulnerabilities:</p>
+<ul>
+<li><strong>GitHub Security Advisories</strong>: <a href="https://github.com/dirvine/ant-quic/security">ant-quic/security</a></li>
+<li><strong>Email</strong>: security@autonomi.org</li>
+</ul>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="../../rfcs/fips-203-ml-kem.pdf">FIPS 203 - ML-KEM</a></li>
+<li><a href="../../rfcs/fips-204-ml-dsa.pdf">FIPS 204 - ML-DSA</a></li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc7250">RFC 7250 - Raw Public Keys</a></li>
+<li><a href="../../docs/guides/pqc-security.html">PQC Security Guide</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

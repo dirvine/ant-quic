@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -178,7 +178,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
-<p>This guide will help you get started with ant-quic.</p>
+<p>This guide will help you get started with ant-quic v0.13.0+.</p>
 <h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
 <ul>
 <li>Rust 1.85.0 or later</li>
@@ -188,42 +188,125 @@
 <h2 id="installation"><a class="header" href="#installation">Installation</a></h2>
 <p>Add ant-quic to your <code>Cargo.toml</code>:</p>
 <pre><code class="language-toml">[dependencies]
-ant-quic = "0.4"
+ant-quic = "0.13"
 tokio = { version = "1", features = ["full"] }
 </code></pre>
+<h2 id="understanding-the-symmetric-p2p-model"><a class="header" href="#understanding-the-symmetric-p2p-model">Understanding the Symmetric P2P Model</a></h2>
+<p>In ant-quic v0.13.0+, <strong>all nodes are symmetric</strong>. There are no special roles - every node can:</p>
+<ul>
+<li><strong>Initiate connections</strong> to other nodes</li>
+<li><strong>Accept connections</strong> from other nodes</li>
+<li><strong>Observe external addresses</strong> of connecting peers</li>
+<li><strong>Coordinate NAT traversal</strong> for other peers</li>
+</ul>
+<p>This means there’s no distinction between “client” and “server” - your application is both.</p>
 <h2 id="your-first-ant-quic-application"><a class="header" href="#your-first-ant-quic-application">Your First ant-quic Application</a></h2>
-<p>Here’s a simple example that creates a QUIC endpoint:</p>
-<pre class="playground"><code class="language-rust">use ant_quic::{
-    quic_node::{QuicNodeConfig, QuicP2PNode},
-    nat_traversal_api::EndpointRole,
-};
+<p>Here’s a simple example that creates a P2P endpoint:</p>
+<pre class="playground"><code class="language-rust">use ant_quic::{P2pEndpoint, P2pConfig, P2pEvent};
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
-    // Configure the node
-    let config = QuicNodeConfig {
-        role: EndpointRole::Client,
-        bootstrap_nodes: vec!["bootstrap.example.com:9000".parse()?],
-        enable_coordinator: false,
-        max_connections: 100,
-        connection_timeout: Duration::from_secs(30),
-        stats_interval: Duration::from_secs(60),
-        auth_config: Default::default(),
-        bind_addr: None,
-    };
+async fn main() -&gt; anyhow::Result&lt;()&gt; {
+    // Configure the endpoint
+    let config = P2pConfig::builder()
+        .known_peer("quic.saorsalabs.com:9000".parse()?)
+        .build()?;
 
-    // Create the node
-    let node = QuicP2PNode::new(config).await?;
-    
-    println!("Node created with peer ID: {:?}", node.peer_id());
-    
+    // Create the endpoint
+    let endpoint = P2pEndpoint::new(config).await?;
+
+    println!("Peer ID: {}", endpoint.peer_id().to_hex());
+
+    // Discover external address through known peers
+    endpoint.connect_bootstrap().await?;
+
+    if let Some(addr) = endpoint.external_address() {
+        println!("External address: {}", addr);
+    }
+
+    // Handle incoming connections
+    while let Some(conn) = endpoint.accept().await {
+        println!("New connection from peer");
+        tokio::spawn(async move {
+            // Handle the connection
+            if let Ok((mut send, mut recv)) = conn.accept_bi().await {
+                if let Ok(data) = recv.read_to_end(4096).await {
+                    println!("Received: {}", String::from_utf8_lossy(&amp;data));
+                }
+            }
+        });
+    }
+
     Ok(())
 }</code></pre>
+<h2 id="key-concepts"><a class="header" href="#key-concepts">Key Concepts</a></h2>
+<h3 id="known-peers"><a class="header" href="#known-peers">Known Peers</a></h3>
+<p>Known peers are simply addresses to connect to first for address discovery. Unlike “bootstrap nodes” in other systems, known peers are not special infrastructure - they’re just regular peers with known addresses.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let config = P2pConfig::builder()
+    .known_peer("peer1.example.com:9000".parse()?)
+    .known_peer("peer2.example.com:9000".parse()?)
+    .build()?;
+<span class="boring">}</span></code></pre>
+<h3 id="address-discovery"><a class="header" href="#address-discovery">Address Discovery</a></h3>
+<p>When you connect to a known peer, they observe your external address and report it back to you via OBSERVED_ADDRESS frames. This works without STUN servers - it’s built into the QUIC protocol.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Connect to known peers and discover external address
+endpoint.connect_bootstrap().await?;
+
+// Now you know how others see you
+let external = endpoint.external_address();
+<span class="boring">}</span></code></pre>
+<h3 id="events"><a class="header" href="#events">Events</a></h3>
+<p>Subscribe to events to monitor your endpoint:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mut events = endpoint.subscribe();
+while let Ok(event) = events.recv().await {
+    match event {
+        P2pEvent::Connected { peer_id, addr } =&gt; {
+            println!("Connected to {} at {}", peer_id.to_hex(), addr);
+        }
+        P2pEvent::AddressDiscovered { addr } =&gt; {
+            println!("Discovered external address: {}", addr);
+        }
+        P2pEvent::HolePunchSucceeded { peer_id, addr } =&gt; {
+            println!("Direct connection to {} via {}", peer_id.to_hex(), addr);
+        }
+        _ =&gt; {}
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="security"><a class="header" href="#security">Security</a></h2>
+<p>Every connection in ant-quic uses hybrid post-quantum cryptography:</p>
+<ul>
+<li><strong>Key Exchange</strong>: X25519 + ML-KEM-768</li>
+<li><strong>Signatures</strong>: Ed25519 + ML-DSA-65</li>
+</ul>
+<p>This is always enabled - there’s no way to disable PQC. Your communications are protected against both current and future quantum attacks.</p>
+<h2 id="whats-not-in-ant-quic-v0130"><a class="header" href="#whats-not-in-ant-quic-v0130">What’s NOT in ant-quic v0.13.0</a></h2>
+<p>The following concepts were <strong>removed</strong> in v0.13.0:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Removed</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td><code>EndpointRole::Client/Server/Bootstrap</code></td><td>All nodes are symmetric</td></tr>
+<tr><td><code>PqcMode</code></td><td>PQC is always on</td></tr>
+<tr><td><code>HybridPreference</code></td><td>No mode selection</td></tr>
+<tr><td>Bootstrap nodes as special infrastructure</td><td>All peers are equal</td></tr>
+</tbody>
+</table>
+</div>
+<p>If you’re migrating from an earlier version, see the <a href="../guides/pqc-migration.html">migration guide</a>.</p>
 <h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
 <ul>
 <li><a href="./installation.html">Installation</a> - Detailed installation instructions</li>
-<li><a href="./quick-start.html">Quick Start</a> - Build your first P2P application</li>
+<li><a href="./quick-start.html">Quick Start</a> - Build a complete P2P application</li>
+<li><a href="./configuration.html">Configuration</a> - All configuration options</li>
 <li><a href="./examples.html">Examples</a> - Explore more complex examples</li>
 </ul>
 

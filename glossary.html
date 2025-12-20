@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,128 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="glossary"><a class="header" href="#glossary">Glossary</a></h1>
+<p>Terms and concepts used in ant-quic documentation.</p>
+<h2 id="a"><a class="header" href="#a">A</a></h2>
+<h3 id="add_address"><a class="header" href="#add_address">ADD_ADDRESS</a></h3>
+<p>A QUIC extension frame (type 0x3d7e90/0x3d7e91) used to advertise candidate addresses during NAT traversal.</p>
+<h3 id="address-discovery"><a class="header" href="#address-discovery">Address Discovery</a></h3>
+<p>The process of learning your external IP address and port as seen by other peers. Implemented via OBSERVED_ADDRESS frames per draft-ietf-quic-address-discovery-00.</p>
+<h2 id="c"><a class="header" href="#c">C</a></h2>
+<h3 id="candidate-address"><a class="header" href="#candidate-address">Candidate Address</a></h3>
+<p>An address that might be used to reach a peer. Candidates can be:</p>
+<ul>
+<li><strong>Local</strong>: Interface addresses</li>
+<li><strong>Observed</strong>: Discovered via OBSERVED_ADDRESS</li>
+<li><strong>Predicted</strong>: Symmetric NAT port predictions</li>
+</ul>
+<h3 id="cgnat"><a class="header" href="#cgnat">CGNAT</a></h3>
+<p>Carrier Grade NAT. ISP-level NAT using the 100.64.0.0/10 address space. Increasingly common due to IPv4 exhaustion.</p>
+<h3 id="connection"><a class="header" href="#connection">Connection</a></h3>
+<p>A QUIC connection between two peers, providing encrypted bidirectional communication with stream multiplexing.</p>
+<h2 id="d"><a class="header" href="#d">D</a></h2>
+<h3 id="draft-ietf-quic-address-discovery-00"><a class="header" href="#draft-ietf-quic-address-discovery-00">draft-ietf-quic-address-discovery-00</a></h3>
+<p>IETF draft specifying how QUIC peers can discover their external addresses through OBSERVED_ADDRESS frames.</p>
+<h3 id="draft-seemann-quic-nat-traversal-02"><a class="header" href="#draft-seemann-quic-nat-traversal-02">draft-seemann-quic-nat-traversal-02</a></h3>
+<p>IETF draft specifying QUIC-native NAT traversal using ADD_ADDRESS and PUNCH_ME_NOW frames.</p>
+<h2 id="e"><a class="header" href="#e">E</a></h2>
+<h3 id="ed25519"><a class="header" href="#ed25519">Ed25519</a></h3>
+<p>An elliptic curve digital signature algorithm used for peer identity in ant-quic.</p>
+<h3 id="endpoint"><a class="header" href="#endpoint">Endpoint</a></h3>
+<p>A QUIC endpoint that can both initiate and accept connections. In ant-quic, all endpoints are symmetric.</p>
+<h2 id="f"><a class="header" href="#f">F</a></h2>
+<h3 id="fips-203"><a class="header" href="#fips-203">FIPS 203</a></h3>
+<p>NIST standard for ML-KEM (Module-Lattice-based Key Encapsulation Mechanism).</p>
+<h3 id="fips-204"><a class="header" href="#fips-204">FIPS 204</a></h3>
+<p>NIST standard for ML-DSA (Module-Lattice-based Digital Signature Algorithm).</p>
+<h3 id="forward-secrecy"><a class="header" href="#forward-secrecy">Forward Secrecy</a></h3>
+<p>A property where compromise of long-term keys doesn’t compromise past session keys. ant-quic achieves this through ephemeral key exchange.</p>
+<h3 id="full-cone-nat"><a class="header" href="#full-cone-nat">Full Cone NAT</a></h3>
+<p>The most permissive NAT type. Once a mapping is created, any external host can send packets to the internal host.</p>
+<h2 id="h"><a class="header" href="#h">H</a></h2>
+<h3 id="hole-punching"><a class="header" href="#hole-punching">Hole Punching</a></h3>
+<p>A technique for establishing direct connections through NAT by having both peers send packets simultaneously, creating NAT mappings that allow the other’s packets through.</p>
+<h3 id="hybrid-cryptography"><a class="header" href="#hybrid-cryptography">Hybrid Cryptography</a></h3>
+<p>Using both classical and post-quantum algorithms together. An attacker must break both to compromise security.</p>
+<h2 id="k"><a class="header" href="#k">K</a></h2>
+<h3 id="known-peer"><a class="header" href="#known-peer">Known Peer</a></h3>
+<p>An address to connect to first for address discovery. Replaces the outdated term “bootstrap node” - known peers are just regular peers with known addresses.</p>
+<h2 id="m"><a class="header" href="#m">M</a></h2>
+<h3 id="ml-dsa-65"><a class="header" href="#ml-dsa-65">ML-DSA-65</a></h3>
+<p>Module-Lattice-based Digital Signature Algorithm at NIST security level 3. Used for post-quantum authentication in ant-quic.</p>
+<h3 id="ml-kem-768"><a class="header" href="#ml-kem-768">ML-KEM-768</a></h3>
+<p>Module-Lattice-based Key Encapsulation Mechanism at NIST security level 3. Used for post-quantum key exchange in ant-quic.</p>
+<h3 id="mtu"><a class="header" href="#mtu">MTU</a></h3>
+<p>Maximum Transmission Unit. The largest packet size that can be sent. PQC increases handshake sizes, affecting MTU requirements.</p>
+<h2 id="n"><a class="header" href="#n">N</a></h2>
+<h3 id="nat"><a class="header" href="#nat">NAT</a></h3>
+<p>Network Address Translation. A technique for mapping private IP addresses to public ones. NAT traversal is needed for P2P connectivity.</p>
+<h3 id="natconfig"><a class="header" href="#natconfig">NatConfig</a></h3>
+<p>Configuration struct for NAT traversal parameters in ant-quic.</p>
+<h2 id="o"><a class="header" href="#o">O</a></h2>
+<h3 id="observed_address"><a class="header" href="#observed_address">OBSERVED_ADDRESS</a></h3>
+<p>A QUIC extension frame (type 0x9f81a6/0x9f81a7) that reports the external address observed by the peer.</p>
+<h2 id="p"><a class="header" href="#p">P</a></h2>
+<h3 id="p2pconfig"><a class="header" href="#p2pconfig">P2pConfig</a></h3>
+<p>The main configuration struct for ant-quic P2P endpoints.</p>
+<h3 id="p2pendpoint"><a class="header" href="#p2pendpoint">P2pEndpoint</a></h3>
+<p>The primary API for ant-quic. Represents a symmetric P2P node that can connect to and accept connections from peers.</p>
+<h3 id="p2pevent"><a class="header" href="#p2pevent">P2pEvent</a></h3>
+<p>Events emitted by the endpoint, including connection events, address discovery, and NAT traversal status.</p>
+<h3 id="peer-id"><a class="header" href="#peer-id">Peer ID</a></h3>
+<p>A unique identifier for a peer, derived from their Ed25519 public key.</p>
+<h3 id="port-restricted-nat"><a class="header" href="#port-restricted-nat">Port Restricted NAT</a></h3>
+<p>A NAT type where external hosts can only send packets if the internal host previously sent to that host and port.</p>
+<h3 id="pqc"><a class="header" href="#pqc">PQC</a></h3>
+<p>Post-Quantum Cryptography. Cryptographic algorithms designed to resist attacks by quantum computers.</p>
+<h3 id="pqcconfig"><a class="header" href="#pqcconfig">PqcConfig</a></h3>
+<p>Configuration struct for PQC parameters. Note: PQC cannot be disabled in v0.13.0+.</p>
+<h3 id="punch_me_now"><a class="header" href="#punch_me_now">PUNCH_ME_NOW</a></h3>
+<p>A QUIC extension frame (type 0x3d7e92/0x3d7e93) used to coordinate simultaneous hole punching.</p>
+<h2 id="q"><a class="header" href="#q">Q</a></h2>
+<h3 id="quic"><a class="header" href="#quic">QUIC</a></h3>
+<p>A modern transport protocol providing multiplexed, encrypted connections over UDP. ant-quic extends QUIC with NAT traversal capabilities.</p>
+<h2 id="r"><a class="header" href="#r">R</a></h2>
+<h3 id="raw-public-keys"><a class="header" href="#raw-public-keys">Raw Public Keys</a></h3>
+<p>A TLS extension (RFC 7250) allowing authentication using bare public keys instead of X.509 certificates.</p>
+<h3 id="rfc-7250"><a class="header" href="#rfc-7250">RFC 7250</a></h3>
+<p>IETF RFC specifying Raw Public Keys for TLS authentication.</p>
+<h3 id="rfc-9000"><a class="header" href="#rfc-9000">RFC 9000</a></h3>
+<p>IETF RFC specifying the QUIC transport protocol.</p>
+<h2 id="s"><a class="header" href="#s">S</a></h2>
+<h3 id="stream"><a class="header" href="#stream">Stream</a></h3>
+<p>A bidirectional or unidirectional data channel within a QUIC connection. Multiple streams can be multiplexed on one connection.</p>
+<h3 id="symmetric-nat"><a class="header" href="#symmetric-nat">Symmetric NAT</a></h3>
+<p>The most restrictive NAT type. Uses different external ports for different destinations, making direct connections difficult.</p>
+<h3 id="symmetric-p2p"><a class="header" href="#symmetric-p2p">Symmetric P2P</a></h3>
+<p>ant-quic’s architectural model where all nodes have identical capabilities - no special roles like “client”, “server”, or “bootstrap”.</p>
+<h2 id="t"><a class="header" href="#t">T</a></h2>
+<h3 id="transport-parameters"><a class="header" href="#transport-parameters">Transport Parameters</a></h3>
+<p>QUIC parameters exchanged during connection establishment. ant-quic uses custom transport parameters for NAT traversal negotiation.</p>
+<h2 id="x"><a class="header" href="#x">X</a></h2>
+<h3 id="x25519"><a class="header" href="#x25519">X25519</a></h3>
+<p>An elliptic curve Diffie-Hellman function used for classical key exchange in ant-quic’s hybrid scheme.</p>
+<hr>
+<h2 id="removed-terms-v0130"><a class="header" href="#removed-terms-v0130">Removed Terms (v0.13.0)</a></h2>
+<p>These terms are <strong>no longer used</strong> in ant-quic v0.13.0+:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Removed Term</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td>Bootstrap Node</td><td>All nodes are symmetric - use “known peer” instead</td></tr>
+<tr><td>Client Role</td><td>No roles in symmetric P2P</td></tr>
+<tr><td>Server Role</td><td>No roles in symmetric P2P</td></tr>
+<tr><td>Coordinator</td><td>All nodes can coordinate</td></tr>
+<tr><td>EndpointRole</td><td>Removed enum - all nodes symmetric</td></tr>
+<tr><td>PqcMode</td><td>Removed - PQC always enabled</td></tr>
+<tr><td>HybridPreference</td><td>Removed - no mode selection</td></tr>
+<tr><td>Classical-Only</td><td>Not available - PQC always on</td></tr>
+</tbody>
+</table>
+</div>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

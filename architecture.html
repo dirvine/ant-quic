@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -185,42 +185,140 @@
 │  ant-quic binary, examples, your apps   │
 ├─────────────────────────────────────────┤
 │      Integration APIs (Layer 2)         │
-│  NatTraversalEndpoint, QuicP2PNode      │
+│  P2pEndpoint, P2pConfig (Primary API)   │
 ├─────────────────────────────────────────┤
 │   Protocol Implementation (Layer 1)     │
 │  QUIC endpoints, connections, frames    │
+│  PQC crypto, NAT traversal extensions   │
 └─────────────────────────────────────────┘
 </code></pre>
 <h2 id="layer-1-protocol-implementation"><a class="header" href="#layer-1-protocol-implementation">Layer 1: Protocol Implementation</a></h2>
-<p>The foundation layer implements the QUIC protocol with NAT traversal extensions:</p>
+<p>The foundation layer implements the QUIC protocol with NAT traversal and PQC extensions:</p>
 <ul>
 <li><strong>Endpoint</strong> (<code>src/endpoint.rs</code>): Core QUIC endpoint management</li>
 <li><strong>Connection</strong> (<code>src/connection/</code>): Connection state machine with NAT traversal</li>
 <li><strong>Frames</strong> (<code>src/frame.rs</code>): QUIC frames including extension frames</li>
-<li><strong>Crypto</strong> (<code>src/crypto/</code>): TLS and Raw Public Key support</li>
+<li><strong>Crypto</strong> (<code>src/crypto/</code>): TLS, Raw Public Keys, and PQC support</li>
 </ul>
+<h3 id="protocol-extensions"><a class="header" href="#protocol-extensions">Protocol Extensions</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Extension</th><th>Standard</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>NAT Traversal</td><td>draft-seemann-quic-nat-traversal-02</td><td>Hole punching coordination</td></tr>
+<tr><td>Address Discovery</td><td>draft-ietf-quic-address-discovery-00</td><td>External address detection</td></tr>
+<tr><td>Raw Public Keys</td><td>RFC 7250</td><td>Certificate-free authentication</td></tr>
+<tr><td>ML-KEM-768</td><td>FIPS 203</td><td>Post-quantum key encapsulation</td></tr>
+<tr><td>ML-DSA-65</td><td>FIPS 204</td><td>Post-quantum digital signatures</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="layer-2-integration-apis"><a class="header" href="#layer-2-integration-apis">Layer 2: Integration APIs</a></h2>
 <p>High-level APIs that make ant-quic easy to use:</p>
 <ul>
-<li><strong>NatTraversalEndpoint</strong> (<code>src/nat_traversal_api.rs</code>): High-level NAT traversal</li>
-<li><strong>QuicP2PNode</strong> (<code>src/quic_node.rs</code>): Application-friendly P2P node</li>
-<li><strong>Connection Establishment</strong> (<code>src/connection_establishment.rs</code>): Connection orchestration</li>
+<li><strong>P2pEndpoint</strong> (<code>src/p2p_endpoint.rs</code>): Primary user-facing API for P2P networking</li>
+<li><strong>P2pConfig</strong> (<code>src/unified_config.rs</code>): Configuration with builder pattern</li>
+<li><strong>NatConfig</strong>: NAT traversal tuning options</li>
+<li><strong>PqcConfig</strong>: Post-quantum cryptography tuning (cannot disable PQC)</li>
+<li><strong>MtuConfig</strong>: MTU configuration for PQC overhead</li>
 </ul>
+<h3 id="primary-api-p2pendpoint"><a class="header" href="#primary-api-p2pendpoint">Primary API: P2pEndpoint</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::{P2pEndpoint, P2pConfig};
+
+let config = P2pConfig::builder()
+    .known_peer("peer.example.com:9000".parse()?)
+    .build()?;
+
+let endpoint = P2pEndpoint::new(config).await?;
+
+// All nodes are symmetric - can connect AND accept
+let conn = endpoint.connect(target).await?;
+let incoming = endpoint.accept().await;
+<span class="boring">}</span></code></pre>
 <h2 id="layer-3-applications"><a class="header" href="#layer-3-applications">Layer 3: Applications</a></h2>
 <p>User-facing applications and tools:</p>
 <ul>
 <li><strong>ant-quic binary</strong> (<code>src/bin/ant-quic.rs</code>): Main executable</li>
 <li><strong>Examples</strong> (<code>examples/</code>): Demo applications</li>
-<li><strong>Your applications</strong>: Built on top of the APIs</li>
+<li><strong>Your applications</strong>: Built on top of the P2pEndpoint API</li>
 </ul>
+<h2 id="symmetric-p2p-model"><a class="header" href="#symmetric-p2p-model">Symmetric P2P Model</a></h2>
+<p>In ant-quic v0.13.0+, all nodes are symmetric:</p>
+<pre><code>┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Node A    │◄───►│   Node B    │◄───►│   Node C    │
+│ (NAT'd)     │     │ (Public IP) │     │ (NAT'd)     │
+└─────────────┘     └─────────────┘     └─────────────┘
+      │                   │                   │
+      └─────────── All Identical ─────────────┘
+</code></pre>
+<p>Every node can:</p>
+<ul>
+<li><strong>Connect</strong> to other nodes (initiate QUIC connections)</li>
+<li><strong>Accept</strong> connections from other nodes</li>
+<li><strong>Observe</strong> external addresses of connecting peers</li>
+<li><strong>Coordinate</strong> NAT traversal for peers</li>
+<li><strong>Relay</strong> traffic when direct connection fails</li>
+</ul>
+<p>There are no special roles (no “bootstrap”, “coordinator”, “server”, “client”). The terms “known peers” refers to addresses you connect to first for address discovery.</p>
+<h2 id="security-architecture"><a class="header" href="#security-architecture">Security Architecture</a></h2>
+<h3 id="always-on-pqc"><a class="header" href="#always-on-pqc">Always-On PQC</a></h3>
+<p>Every connection uses hybrid cryptography:</p>
+<pre><code>┌─────────────────┐     ┌─────────────────┐
+│   Classical     │     │  Post-Quantum   │
+├─────────────────┤     ├─────────────────┤
+│    X25519       │  +  │   ML-KEM-768    │ = Hybrid Key Exchange
+│    Ed25519      │  +  │   ML-DSA-65     │ = Hybrid Signatures
+└─────────────────┘     └─────────────────┘
+</code></pre>
+<p>Both algorithm families must be broken to compromise security.</p>
+<h3 id="raw-public-keys"><a class="header" href="#raw-public-keys">Raw Public Keys</a></h3>
+<p>Identity is based on Ed25519 keys without certificates:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::key_utils::{generate_ed25519_keypair, derive_peer_id};
+
+let (private_key, public_key) = generate_ed25519_keypair();
+let peer_id = derive_peer_id(&amp;public_key);
+<span class="boring">}</span></code></pre>
 <h2 id="key-design-principles"><a class="header" href="#key-design-principles">Key Design Principles</a></h2>
 <ol>
+<li><strong>Symmetric</strong>: All nodes are equal - no special infrastructure required</li>
+<li><strong>Secure by Default</strong>: 100% PQC on every connection</li>
 <li><strong>Modular</strong>: Each layer can be used independently</li>
 <li><strong>Extensible</strong>: Easy to add new features</li>
 <li><strong>Performant</strong>: Zero-cost abstractions where possible</li>
-<li><strong>Secure</strong>: Authentication and encryption by default</li>
 <li><strong>Testable</strong>: Comprehensive test coverage at each layer</li>
 </ol>
+<h2 id="data-flow"><a class="header" href="#data-flow">Data Flow</a></h2>
+<h3 id="connection-establishment"><a class="header" href="#connection-establishment">Connection Establishment</a></h3>
+<ol>
+<li><strong>Discovery</strong>: Connect to known peers, receive OBSERVED_ADDRESS frames</li>
+<li><strong>Candidate Exchange</strong>: Share candidate addresses via ADD_ADDRESS frames</li>
+<li><strong>Coordination</strong>: Synchronize hole punching via PUNCH_ME_NOW frames</li>
+<li><strong>Connection</strong>: Establish direct QUIC connection with PQC handshake</li>
+<li><strong>Validation</strong>: Verify peer identity via Raw Public Keys</li>
+</ol>
+<h3 id="address-discovery"><a class="header" href="#address-discovery">Address Discovery</a></h3>
+<pre><code class="language-mermaid">sequenceDiagram
+    participant A as Node A
+    participant B as Known Peer B
+
+    A-&gt;&gt;B: QUIC Connection
+    B-&gt;&gt;A: OBSERVED_ADDRESS (A's external IP:port)
+    A-&gt;&gt;A: Store discovered address
+    Note over A: Now knows external address
+</code></pre>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="./protocol-extensions.html">Protocol Extensions</a></li>
+<li><a href="./nat-traversal.html">NAT Traversal</a></li>
+<li><a href="./security.html">Security</a></li>
+<li><a href="./api-reference.html">API Reference</a></li>
+</ul>
 
                     </main>
 

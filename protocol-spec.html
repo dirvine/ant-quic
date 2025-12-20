@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,276 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="protocol-specification"><a class="header" href="#protocol-specification">Protocol Specification</a></h1>
+<p>Technical specification for ant-quic’s QUIC extensions.</p>
+<h2 id="standards-compliance"><a class="header" href="#standards-compliance">Standards Compliance</a></h2>
+<p>ant-quic implements or extends:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Standard</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>RFC 9000</td><td>QUIC Transport Protocol</td></tr>
+<tr><td>RFC 9001</td><td>Using TLS with QUIC</td></tr>
+<tr><td>RFC 7250</td><td>Raw Public Keys in TLS</td></tr>
+<tr><td>draft-seemann-quic-nat-traversal-02</td><td>NAT Traversal for QUIC</td></tr>
+<tr><td>draft-ietf-quic-address-discovery-00</td><td>Address Discovery</td></tr>
+<tr><td>FIPS 203</td><td>ML-KEM-768</td></tr>
+<tr><td>FIPS 204</td><td>ML-DSA-65</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="transport-parameters"><a class="header" href="#transport-parameters">Transport Parameters</a></h2>
+<h3 id="nat-traversal-capability"><a class="header" href="#nat-traversal-capability">NAT Traversal Capability</a></h3>
+<pre><code>Parameter ID: 0x3d7e9f0bca12fea6
+Length: 0
+Purpose: Indicates NAT traversal support
+</code></pre>
+<h3 id="rfc-compliant-frame-format"><a class="header" href="#rfc-compliant-frame-format">RFC-Compliant Frame Format</a></h3>
+<pre><code>Parameter ID: 0x3d7e9f0bca12fea8
+Length: 0
+Purpose: Indicates RFC-compliant frame format
+</code></pre>
+<h3 id="address-discovery-configuration"><a class="header" href="#address-discovery-configuration">Address Discovery Configuration</a></h3>
+<pre><code>Parameter ID: 0x9f81a176
+Length: Variable
+Purpose: Address discovery settings
+Format:
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  Flags (8)  | Lifetime (varint)|
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</code></pre>
+<h2 id="extension-frames"><a class="header" href="#extension-frames">Extension Frames</a></h2>
+<h3 id="add_address"><a class="header" href="#add_address">ADD_ADDRESS</a></h3>
+<p>Advertises address candidates to peer.</p>
+<pre><code>Type: 0x3d7e90 (IPv4), 0x3d7e91 (IPv6)
+
+Format:
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (i)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
++                       IP Address (4/16)                       +
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|            Port (16)          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Fields:
+- Sequence Number: Monotonically increasing identifier
+- IP Address: 4 bytes (IPv4) or 16 bytes (IPv6)
+- Port: 16-bit port number
+</code></pre>
+<h3 id="punch_me_now"><a class="header" href="#punch_me_now">PUNCH_ME_NOW</a></h3>
+<p>Coordinates hole punching timing.</p>
+<pre><code>Type: 0x3d7e92 (IPv4), 0x3d7e93 (IPv6)
+
+Format:
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (i)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
++                     Target IP Address (4/16)                  +
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|          Target Port (16)     |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Fields:
+- Sequence Number: Matches ADD_ADDRESS sequence
+- Target IP Address: Address to punch toward
+- Target Port: Port to punch toward
+</code></pre>
+<h3 id="remove_address"><a class="header" href="#remove_address">REMOVE_ADDRESS</a></h3>
+<p>Removes a previously advertised address.</p>
+<pre><code>Type: 0x3d7e94
+
+Format:
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (i)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Fields:
+- Sequence Number: Identifies the address to remove
+</code></pre>
+<h3 id="observed_address"><a class="header" href="#observed_address">OBSERVED_ADDRESS</a></h3>
+<p>Reports observed external address to peer.</p>
+<pre><code>Type: 0x9f81a6 (IPv4), 0x9f81a7 (IPv6)
+
+Format:
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (i)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
++                    Observed IP Address (4/16)                 +
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|         Observed Port (16)    |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Fields:
+- Sequence Number: Monotonically increasing
+- Observed IP Address: Address seen by sender
+- Observed Port: Port seen by sender
+</code></pre>
+<h2 id="variable-length-integer-encoding"><a class="header" href="#variable-length-integer-encoding">Variable-Length Integer Encoding</a></h2>
+<p>QUIC uses variable-length integers:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Range</th><th>Prefix</th><th>Bytes</th></tr>
+</thead>
+<tbody>
+<tr><td>0-63</td><td>00</td><td>1</td></tr>
+<tr><td>0-16383</td><td>01</td><td>2</td></tr>
+<tr><td>0-1073741823</td><td>10</td><td>4</td></tr>
+<tr><td>0-4611686018427387903</td><td>11</td><td>8</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="handshake-protocol"><a class="header" href="#handshake-protocol">Handshake Protocol</a></h2>
+<h3 id="connection-establishment"><a class="header" href="#connection-establishment">Connection Establishment</a></h3>
+<pre><code>Client                                Server
+   |                                     |
+   |------------ Initial ----------------&gt;|
+   |   + ClientHello (with X25519+ML-KEM) |
+   |                                     |
+   |&lt;----------- Initial ----------------|
+   |   + ServerHello (with X25519+ML-KEM) |
+   |   + EncryptedExtensions             |
+   |   + Certificate (Raw Public Key)    |
+   |   + CertificateVerify (Ed25519+ML-DSA)|
+   |   + Finished                        |
+   |                                     |
+   |------------ Handshake -------------&gt;|
+   |   + Certificate (Raw Public Key)    |
+   |   + CertificateVerify (Ed25519+ML-DSA)|
+   |   + Finished                        |
+   |                                     |
+   |&lt;========= Application Data ========&gt;|
+</code></pre>
+<h3 id="nat-traversal-negotiation"><a class="header" href="#nat-traversal-negotiation">NAT Traversal Negotiation</a></h3>
+<p>During handshake, peers exchange transport parameters:</p>
+<pre><code>Transport Parameters (Client):
+  - 0x3d7e9f0bca12fea6: (NAT traversal capability)
+  - 0x9f81a176: [discovery config]
+
+Transport Parameters (Server):
+  - 0x3d7e9f0bca12fea6: (NAT traversal capability)
+  - 0x9f81a176: [discovery config]
+</code></pre>
+<h2 id="cryptographic-specifications"><a class="header" href="#cryptographic-specifications">Cryptographic Specifications</a></h2>
+<h3 id="key-exchange"><a class="header" href="#key-exchange">Key Exchange</a></h3>
+<ol>
+<li>
+<p><strong>X25519</strong>: Classical ECDH</p>
+<ul>
+<li>Public key: 32 bytes</li>
+<li>Shared secret: 32 bytes</li>
+</ul>
+</li>
+<li>
+<p><strong>ML-KEM-768</strong>: Post-quantum KEM</p>
+<ul>
+<li>Public key: 1,184 bytes</li>
+<li>Ciphertext: 1,088 bytes</li>
+<li>Shared secret: 32 bytes</li>
+</ul>
+</li>
+</ol>
+<p>Combined shared secret:</p>
+<pre><code>shared_secret = KDF(x25519_shared || ml_kem_shared)
+</code></pre>
+<h3 id="digital-signatures"><a class="header" href="#digital-signatures">Digital Signatures</a></h3>
+<ol>
+<li>
+<p><strong>Ed25519</strong>: Classical signatures</p>
+<ul>
+<li>Public key: 32 bytes</li>
+<li>Signature: 64 bytes</li>
+</ul>
+</li>
+<li>
+<p><strong>ML-DSA-65</strong>: Post-quantum signatures</p>
+<ul>
+<li>Public key: 1,952 bytes</li>
+<li>Signature: 3,293 bytes</li>
+</ul>
+</li>
+</ol>
+<p>Combined signature:</p>
+<pre><code>signature = ed25519_sig || ml_dsa_sig
+</code></pre>
+<h3 id="raw-public-keys"><a class="header" href="#raw-public-keys">Raw Public Keys</a></h3>
+<p>Per RFC 7250:</p>
+<pre><code>struct {
+    SubjectPublicKeyInfo public_key;
+} Certificate;
+</code></pre>
+<p>No certificate chain, CA, or extensions.</p>
+<h2 id="address-discovery-protocol"><a class="header" href="#address-discovery-protocol">Address Discovery Protocol</a></h2>
+<h3 id="discovery-flow"><a class="header" href="#discovery-flow">Discovery Flow</a></h3>
+<pre><code>Connecting Node                      Known Peer
+      |                                  |
+      |--------- QUIC Handshake --------&gt;|
+      |                                  |
+      |                     [Observe source address]
+      |                                  |
+      |&lt;------- OBSERVED_ADDRESS --------|
+      |   (addr: 203.0.113.50:45678)     |
+      |                                  |
+      |         [Now knows external address]
+      |                                  |
+</code></pre>
+<h3 id="hole-punching-protocol"><a class="header" href="#hole-punching-protocol">Hole Punching Protocol</a></h3>
+<pre><code>Node A                 Coordinator              Node B
+   |                       |                       |
+   |-- ADD_ADDRESS -------&gt;|                       |
+   |                       |&lt;------ ADD_ADDRESS ---|
+   |                       |                       |
+   |                   [Exchange candidates]       |
+   |                       |                       |
+   |&lt;-- PUNCH_ME_NOW ------|                       |
+   |                       |------- PUNCH_ME_NOW -&gt;|
+   |                       |                       |
+   |============= Simultaneous UDP ===============&gt;|
+   |&lt;============ Simultaneous UDP ================|
+   |                       |                       |
+   |&lt;=== Direct QUIC Connection Established =====&gt;|
+</code></pre>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<h3 id="frame-authentication"><a class="header" href="#frame-authentication">Frame Authentication</a></h3>
+<p>All extension frames are:</p>
+<ol>
+<li>Sent over authenticated QUIC connections</li>
+<li>Encrypted with TLS 1.3 (AEAD)</li>
+<li>Bound to the connection ID</li>
+</ol>
+<h3 id="address-validation"><a class="header" href="#address-validation">Address Validation</a></h3>
+<p>Receivers MUST validate:</p>
+<ol>
+<li>Sequence numbers are monotonic</li>
+<li>Addresses are valid (no multicast, etc.)</li>
+<li>Rate limits are respected</li>
+</ol>
+<h3 id="rate-limiting"><a class="header" href="#rate-limiting">Rate Limiting</a></h3>
+<p>Implementations SHOULD limit:</p>
+<ul>
+<li>ADD_ADDRESS: 10 per second</li>
+<li>PUNCH_ME_NOW: 5 per second</li>
+<li>OBSERVED_ADDRESS: 2 per second</li>
+</ul>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9000">RFC 9000</a></li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc7250">RFC 7250</a></li>
+<li><a href="../../rfcs/draft-seemann-quic-nat-traversal-02.txt">draft-seemann-quic-nat-traversal-02</a></li>
+<li><a href="../../rfcs/draft-ietf-quic-address-discovery-00.txt">draft-ietf-quic-address-discovery-00</a></li>
+<li><a href="../../rfcs/fips-203-ml-kem.pdf">FIPS 203</a></li>
+<li><a href="../../rfcs/fips-204-ml-dsa.pdf">FIPS 204</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

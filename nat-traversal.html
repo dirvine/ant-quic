@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,126 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="nat-traversal"><a class="header" href="#nat-traversal">NAT Traversal</a></h1>
+<p>ant-quic implements QUIC-native NAT traversal without requiring STUN, TURN, or ICE protocols. The implementation follows <a href="../../rfcs/draft-seemann-quic-nat-traversal-02.txt">draft-seemann-quic-nat-traversal-02</a>.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>NAT traversal in ant-quic works through:</p>
+<ol>
+<li><strong>Address Discovery</strong>: Learn your external address from peers</li>
+<li><strong>Candidate Exchange</strong>: Share candidate addresses with target peer</li>
+<li><strong>Coordinated Hole Punching</strong>: Simultaneous packet exchange to open NAT mappings</li>
+<li><strong>Direct Connection</strong>: Establish QUIC connection through the punched hole</li>
+</ol>
+<h2 id="why-quic-native"><a class="header" href="#why-quic-native">Why QUIC-Native?</a></h2>
+<p>Traditional NAT traversal uses separate protocols (STUN/TURN/ICE). ant-quic integrates NAT traversal directly into QUIC:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Traditional</th><th>QUIC-Native</th></tr>
+</thead>
+<tbody>
+<tr><td>STUN servers for address discovery</td><td>OBSERVED_ADDRESS frames from peers</td></tr>
+<tr><td>TURN servers for relay</td><td>Any peer can relay</td></tr>
+<tr><td>ICE for coordination</td><td>PUNCH_ME_NOW frames for coordination</td></tr>
+<tr><td>Separate UDP sockets</td><td>Same QUIC connection</td></tr>
+</tbody>
+</table>
+</div>
+<p>Benefits:</p>
+<ul>
+<li><strong>No external infrastructure</strong>: Any peer can help with discovery</li>
+<li><strong>Faster</strong>: Uses existing QUIC connections</li>
+<li><strong>Simpler</strong>: One protocol instead of three</li>
+<li><strong>Secure</strong>: All traffic encrypted with PQC</li>
+</ul>
+<h2 id="symmetric-p2p-model"><a class="header" href="#symmetric-p2p-model">Symmetric P2P Model</a></h2>
+<p>In ant-quic v0.13.0+, <strong>all nodes participate equally</strong> in NAT traversal. Any node with a public IP address can serve as the coordination peer that helps two NAT’d nodes connect.</p>
+<h2 id="address-discovery"><a class="header" href="#address-discovery">Address Discovery</a></h2>
+<p>When you connect to a peer, they observe your source address and send it back using the OBSERVED_ADDRESS frame (0x9f81a6 for IPv4, 0x9f81a7 for IPv6). This replaces the need for STUN servers.</p>
+<h3 id="observed_address-frame-format"><a class="header" href="#observed_address-frame-format">OBSERVED_ADDRESS Frame Format</a></h3>
+<pre><code>Frame Type: 0x9f81a6 (IPv4) or 0x9f81a7 (IPv6)
+Payload: IP Address (4 or 16 bytes) + Port (2 bytes)
+</code></pre>
+<h2 id="hole-punching-protocol"><a class="header" href="#hole-punching-protocol">Hole Punching Protocol</a></h2>
+<h3 id="step-1-candidate-exchange"><a class="header" href="#step-1-candidate-exchange">Step 1: Candidate Exchange</a></h3>
+<p>Nodes share their candidate addresses via ADD_ADDRESS frames (0x3d7e90-91):</p>
+<pre><code>ADD_ADDRESS Frame:
+- Address ID (variable)
+- IP Version (4 or 6)
+- IP Address (4 or 16 bytes)
+- Port (2 bytes)
+- Priority (variable)
+</code></pre>
+<h3 id="step-2-coordinated-punching"><a class="header" href="#step-2-coordinated-punching">Step 2: Coordinated Punching</a></h3>
+<p>The PUNCH_ME_NOW frame (0x3d7e92-93) coordinates timing:</p>
+<pre><code>PUNCH_ME_NOW Frame:
+- Peer Address ID
+- Path ID
+- Timestamp
+</code></pre>
+<p>Both peers send packets simultaneously to punch through their respective NATs.</p>
+<h3 id="step-3-connection-establishment"><a class="header" href="#step-3-connection-establishment">Step 3: Connection Establishment</a></h3>
+<p>Once the hole is punched, QUIC connection establishment proceeds normally using the newly discovered direct path.</p>
+<h2 id="nat-types-supported"><a class="header" href="#nat-types-supported">NAT Types Supported</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>NAT Type</th><th>Success Rate</th></tr>
+</thead>
+<tbody>
+<tr><td>Full Cone</td><td>100%</td></tr>
+<tr><td>Address Restricted</td><td>95%+</td></tr>
+<tr><td>Port Restricted</td><td>90%+</td></tr>
+<tr><td>Symmetric</td><td>70%+</td></tr>
+<tr><td>Carrier-Grade NAT (CGNAT)</td><td>60%+</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>NAT traversal is enabled by default. Configuration options:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ant_quic::P2pConfig;
+
+let config = P2pConfig::builder()
+    .known_peers(vec!["peer1.example.com:9000".parse()?])
+    .build()?;
+<span class="boring">}</span></code></pre>
+<h2 id="monitoring"><a class="header" href="#monitoring">Monitoring</a></h2>
+<p>Check NAT traversal statistics via the metrics system:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let stats = endpoint.get_nat_traversal_stats();
+println!("Direct connections: {}", stats.direct_connections);
+println!("NAT traversals: {}", stats.successful_traversals);
+println!("Success rate: {:.1}%", stats.success_rate() * 100.0);
+<span class="boring">}</span></code></pre>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<h3 id="no-external-address-discovered"><a class="header" href="#no-external-address-discovered">No External Address Discovered</a></h3>
+<ul>
+<li>Ensure at least one peer with a public IP is reachable</li>
+<li>Check firewall rules allow UDP traffic</li>
+<li>Verify the peer is correctly observing and reporting addresses</li>
+</ul>
+<h3 id="hole-punch-failures"><a class="header" href="#hole-punch-failures">Hole Punch Failures</a></h3>
+<ul>
+<li>Symmetric NATs may require multiple attempts</li>
+<li>Try increasing the punch attempt timeout</li>
+<li>Consider using a relay as fallback</li>
+</ul>
+<h3 id="connection-timeouts"><a class="header" href="#connection-timeouts">Connection Timeouts</a></h3>
+<ul>
+<li>Check both peers have correctly exchanged candidates</li>
+<li>Verify coordination timing between peers</li>
+<li>Enable debug logging for detailed diagnostics</li>
+</ul>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="../../rfcs/draft-seemann-quic-nat-traversal-02.txt">QUIC NAT Traversal Draft</a></li>
+<li><a href="../../rfcs/draft-ietf-quic-address-discovery-00.txt">Address Discovery Draft</a></li>
+<li><a href="./pqc.html">Post-Quantum Cryptography</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

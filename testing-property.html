@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -177,7 +177,238 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        
+                        <h1 id="property-based-tests"><a class="header" href="#property-based-tests">Property-Based Tests</a></h1>
+<p>Property-based testing verifies that code maintains invariants across randomly generated inputs.</p>
+<h2 id="using-proptest"><a class="header" href="#using-proptest">Using Proptest</a></h2>
+<p>ant-quic uses <a href="https://proptest-rs.github.io/proptest/">proptest</a> for property-based testing.</p>
+<h3 id="basic-example"><a class="header" href="#basic-example">Basic Example</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn peer_id_roundtrip(bytes in any::&lt;[u8; 32]&gt;()) {
+        let peer_id = PeerId::from_bytes(bytes);
+        let hex = peer_id.to_hex();
+        let recovered = PeerId::from_hex(&amp;hex).unwrap();
+        prop_assert_eq!(peer_id, recovered);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="running-property-tests"><a class="header" href="#running-property-tests">Running Property Tests</a></h2>
+<pre><code class="language-bash"># All property tests
+cargo test proptest
+
+# With more cases
+PROPTEST_CASES=10000 cargo test proptest
+
+# Specific property test
+cargo test peer_id_roundtrip
+
+# With verbose output
+cargo test proptest -- --nocapture
+</code></pre>
+<h2 id="key-properties"><a class="header" href="#key-properties">Key Properties</a></h2>
+<h3 id="frame-encodingdecoding"><a class="header" href="#frame-encodingdecoding">Frame Encoding/Decoding</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>proptest! {
+    #[test]
+    fn add_address_frame_roundtrip(
+        sequence in 0u64..u64::MAX,
+        ip in any::&lt;[u8; 4]&gt;(),
+        port in 1024u16..65535,
+    ) {
+        let addr = SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::from(ip)),
+            port
+        );
+
+        let frame = AddAddressFrame { sequence, addr };
+
+        let mut buf = Vec::new();
+        frame.encode(&amp;mut buf);
+
+        let decoded = AddAddressFrame::decode(&amp;buf).unwrap();
+
+        prop_assert_eq!(frame.sequence, decoded.sequence);
+        prop_assert_eq!(frame.addr, decoded.addr);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="candidate-priority"><a class="header" href="#candidate-priority">Candidate Priority</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>proptest! {
+    #[test]
+    fn candidate_priority_ordering(
+        candidates in prop::collection::vec(arb_candidate(), 1..100)
+    ) {
+        let mut sorted = candidates.clone();
+        sorted.sort_by_key(|c| std::cmp::Reverse(c.priority));
+
+        // Verify sorting is stable
+        for i in 1..sorted.len() {
+            prop_assert!(sorted[i-1].priority &gt;= sorted[i].priority);
+        }
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="configuration-validation"><a class="header" href="#configuration-validation">Configuration Validation</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>proptest! {
+    #[test]
+    fn config_builder_validates(
+        max_conns in 1usize..1000,
+        timeout_ms in 1000u64..60000,
+    ) {
+        let result = P2pConfig::builder()
+            .max_connections(max_conns)
+            .connection_timeout(Duration::from_millis(timeout_ms))
+            .build();
+
+        prop_assert!(result.is_ok());
+
+        let config = result.unwrap();
+        prop_assert_eq!(config.max_connections, max_conns);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="variable-length-integer-encoding"><a class="header" href="#variable-length-integer-encoding">Variable-Length Integer Encoding</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>proptest! {
+    #[test]
+    fn varint_roundtrip(value in 0u64..=0x3FFF_FFFF_FFFF_FFFF) {
+        let mut buf = Vec::new();
+        encode_varint(value, &amp;mut buf);
+
+        let decoded = decode_varint(&amp;buf).unwrap();
+
+        prop_assert_eq!(value, decoded);
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="custom-strategies"><a class="header" href="#custom-strategies">Custom Strategies</a></h2>
+<h3 id="arbitrary-addresses"><a class="header" href="#arbitrary-addresses">Arbitrary Addresses</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn arb_socket_addr() -&gt; impl Strategy&lt;Value = SocketAddr&gt; {
+    (any::&lt;[u8; 4]&gt;(), 1024u16..65535).prop_map(|(ip, port)| {
+        SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::from(ip)),
+            port
+        )
+    })
+}
+<span class="boring">}</span></code></pre>
+<h3 id="arbitrary-candidates"><a class="header" href="#arbitrary-candidates">Arbitrary Candidates</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn arb_candidate() -&gt; impl Strategy&lt;Value = CandidateAddress&gt; {
+    (
+        arb_socket_addr(),
+        prop_oneof![
+            Just(CandidateSource::Local),
+            Just(CandidateSource::Observed),
+            Just(CandidateSource::Predicted),
+        ],
+        0u32..1000,
+    ).prop_map(|(addr, source, priority)| {
+        CandidateAddress { addr, source, priority }
+    })
+}
+<span class="boring">}</span></code></pre>
+<h3 id="arbitrary-events"><a class="header" href="#arbitrary-events">Arbitrary Events</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn arb_event() -&gt; impl Strategy&lt;Value = P2pEvent&gt; {
+    prop_oneof![
+        (arb_peer_id(), arb_socket_addr()).prop_map(|(peer_id, addr)| {
+            P2pEvent::Connected { peer_id, addr }
+        }),
+        arb_socket_addr().prop_map(|addr| {
+            P2pEvent::AddressDiscovered { addr }
+        }),
+    ]
+}
+<span class="boring">}</span></code></pre>
+<h2 id="regression-testing"><a class="header" href="#regression-testing">Regression Testing</a></h2>
+<p>When proptest finds a failure, it saves it:</p>
+<pre><code>tests/proptest-regressions/
+   frame_tests.txt
+   candidate_tests.txt
+   config_tests.txt
+</code></pre>
+<p>These are automatically replayed on subsequent runs.</p>
+<h3 id="manual-regression"><a class="header" href="#manual-regression">Manual Regression</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>proptest! {
+    #[test]
+    fn test_with_regression(x in 0..100) {
+        // If this fails for x=42, add:
+        // #[test_case(42)]
+        prop_assert!(x != 42);
+    }
+}
+
+// Explicit regression test
+#[test]
+fn regression_42() {
+    // Test the specific failing case
+}
+<span class="boring">}</span></code></pre>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<h3 id="increase-test-cases"><a class="header" href="#increase-test-cases">Increase Test Cases</a></h3>
+<pre><code class="language-bash"># Default: 256 cases
+cargo test proptest
+
+# More cases for CI
+PROPTEST_CASES=10000 cargo test proptest
+
+# Maximum coverage
+PROPTEST_CASES=100000 cargo test proptest -- --test-threads=1
+</code></pre>
+<h3 id="proptest-config-file"><a class="header" href="#proptest-config-file">Proptest Config File</a></h3>
+<p>Create <code>proptest-config.toml</code>:</p>
+<pre><code class="language-toml">[default]
+cases = 1000
+max_shrink_iters = 10000
+
+[fork]
+timeout = 60000
+</code></pre>
+<h2 id="shrinking"><a class="header" href="#shrinking">Shrinking</a></h2>
+<p>Proptest automatically shrinks failing inputs to minimal examples:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>proptest! {
+    #[test]
+    fn finds_minimal_failure(s in ".*") {
+        prop_assert!(s.len() &lt; 10);
+    }
+}
+// Will shrink "abcdefghijk" to "aaaaaaaaaa" (minimal 10-char string)
+<span class="boring">}</span></code></pre>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Test invariants, not specific values</strong></li>
+<li><strong>Use appropriate value ranges</strong></li>
+<li><strong>Combine with unit tests for edge cases</strong></li>
+<li><strong>Commit regression files</strong></li>
+<li><strong>Increase cases in CI</strong></li>
+</ol>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./testing.html">Testing Overview</a></li>
+<li><a href="./testing-unit.html">Unit Tests</a></li>
+<li><a href="./testing-integration.html">Integration Tests</a></li>
+<li><a href="https://proptest-rs.github.io/proptest/">proptest documentation</a></li>
+</ul>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

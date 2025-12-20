@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fdeb498b.js";
+            window.path_to_searchindex_js = "searchindex-29e6057a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8afbb71c.js"></script>
@@ -178,29 +178,24 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
-<p>Let’s build a simple P2P chat application using ant-quic.</p>
+<p>Let’s build a simple P2P application using ant-quic v0.13.0+.</p>
 <h2 id="create-a-new-project"><a class="header" href="#create-a-new-project">Create a New Project</a></h2>
-<pre><code class="language-bash">cargo new ant-quic-chat
-cd ant-quic-chat
+<pre><code class="language-bash">cargo new ant-quic-demo
+cd ant-quic-demo
 </code></pre>
 <h2 id="add-dependencies"><a class="header" href="#add-dependencies">Add Dependencies</a></h2>
 <p>Edit <code>Cargo.toml</code>:</p>
 <pre><code class="language-toml">[dependencies]
-ant-quic = "0.4"
+ant-quic = "0.13"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1.0"
 </code></pre>
-<h2 id="basic-chat-application"><a class="header" href="#basic-chat-application">Basic Chat Application</a></h2>
+<h2 id="basic-p2p-application"><a class="header" href="#basic-p2p-application">Basic P2P Application</a></h2>
 <p>Create <code>src/main.rs</code>:</p>
-<pre class="playground"><code class="language-rust">use ant_quic::{
-    chat::ChatMessage,
-    quic_node::{QuicNodeConfig, QuicP2PNode},
-    nat_traversal_api::EndpointRole,
-    auth::AuthConfig,
-};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+<pre class="playground"><code class="language-rust">use ant_quic::{P2pEndpoint, P2pConfig, P2pEvent, NatConfig};
+use std::time::Duration;
 use tracing::info;
 
 #[tokio::main]
@@ -208,42 +203,53 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
-    // Parse command line arguments
-    let args: Vec&lt;String&gt; = std::env::args().collect();
-    let listen_addr: SocketAddr = args
-        .get(1)
-        .unwrap_or(&amp;"0.0.0.0:0".to_string())
-        .parse()?;
+    // Configure the P2P endpoint
+    // All nodes are symmetric - no roles to configure!
+    let config = P2pConfig::builder()
+        // Known peers to connect to first for address discovery
+        .known_peer("quic.saorsalabs.com:9000".parse()?)
+        // NAT traversal tuning (optional - sensible defaults provided)
+        .nat(NatConfig {
+            max_candidates: 10,
+            coordination_timeout: Duration::from_secs(15),
+            discovery_timeout: Duration::from_secs(5),
+            enable_symmetric_nat: true,
+            ..Default::default()
+        })
+        .build()?;
 
-    // Configure the node
-    let config = QuicNodeConfig {
-        role: EndpointRole::Client,
-        bootstrap_nodes: vec![], // Add bootstrap nodes here
-        enable_coordinator: false,
-        max_connections: 100,
-        connection_timeout: Duration::from_secs(30),
-        stats_interval: Duration::from_secs(60),
-        auth_config: AuthConfig::default(),
-        bind_addr: Some(listen_addr),
-    };
+    // Create the endpoint
+    let endpoint = P2pEndpoint::new(config).await?;
+    info!("Node started with peer ID: {:?}", endpoint.peer_id());
 
-    // Create the node
-    let node = Arc::new(QuicP2PNode::new(config).await?);
-    info!("Node started with peer ID: {:?}", node.peer_id());
+    // Connect to known peers and discover our external address
+    endpoint.connect_bootstrap().await?;
 
-    // Handle incoming messages
-    let node_clone = Arc::clone(&amp;node);
+    // Check what address others see us as
+    if let Some(addr) = endpoint.external_address() {
+        info!("Our external address: {}", addr);
+    }
+
+    // Subscribe to P2P events
+    let mut events = endpoint.subscribe();
+
+    // Spawn event handler
     tokio::spawn(async move {
-        loop {
-            match node_clone.receive().await {
-                Ok((peer_id, data)) =&gt; {
-                    if let Ok(msg) = ChatMessage::deserialize(&amp;data) {
-                        info!("Received from {:?}: {:?}", peer_id, msg);
-                    }
+        while let Ok(event) = events.recv().await {
+            match event {
+                P2pEvent::Connected { peer_id, addr } =&gt; {
+                    info!("Connected to {} at {}", peer_id.to_hex(), addr);
                 }
-                Err(_) =&gt; {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                P2pEvent::Disconnected { peer_id, reason } =&gt; {
+                    info!("Disconnected from {}: {}", peer_id.to_hex(), reason);
                 }
+                P2pEvent::AddressDiscovered { addr } =&gt; {
+                    info!("Discovered external address: {}", addr);
+                }
+                P2pEvent::HolePunchSucceeded { peer_id, addr } =&gt; {
+                    info!("Direct connection to {} via {}", peer_id.to_hex(), addr);
+                }
+                _ =&gt; {}
             }
         }
     });
@@ -255,22 +261,58 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
     Ok(())
 }</code></pre>
 <h2 id="running-the-application"><a class="header" href="#running-the-application">Running the Application</a></h2>
+<pre><code class="language-bash"># Run the node
+cargo run
+</code></pre>
+<p>Since all nodes are symmetric, there’s no separate “server” or “client” mode. Every node can both connect to others and accept connections.</p>
+<h2 id="connecting-to-a-specific-peer"><a class="header" href="#connecting-to-a-specific-peer">Connecting to a Specific Peer</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Connect to a peer by address
+let target = "192.168.1.100:9000".parse()?;
+let connection = endpoint.connect(target).await?;
+
+// Open a bidirectional stream
+let (mut send, mut recv) = connection.open_bi().await?;
+
+// Send data
+send.write_all(b"Hello, peer!").await?;
+send.finish()?;
+
+// Receive response
+let response = recv.read_to_end(1024).await?;
+println!("Response: {:?}", response);
+<span class="boring">}</span></code></pre>
+<h2 id="accepting-connections"><a class="header" href="#accepting-connections">Accepting Connections</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Accept incoming connections (all nodes can do this!)
+while let Some(conn) = endpoint.accept().await {
+    tokio::spawn(async move {
+        // Handle the connection
+        if let Ok(stream) = conn.accept_bi().await {
+            let (send, mut recv) = stream;
+            // Process incoming data
+            let data = recv.read_to_end(4096).await.unwrap_or_default();
+            println!("Received: {:?}", data);
+        }
+    });
+}
+<span class="boring">}</span></code></pre>
+<h2 id="key-concepts"><a class="header" href="#key-concepts">Key Concepts</a></h2>
 <ol>
-<li>Start a bootstrap node:</li>
+<li><strong>Symmetric P2P</strong>: Every node is identical - no roles, no special infrastructure</li>
+<li><strong>Known Peers</strong>: Addresses to connect to first for address discovery (not “bootstrap nodes”)</li>
+<li><strong>100% PQC</strong>: ML-KEM-768 + ML-DSA-65 on every connection (cannot be disabled)</li>
+<li><strong>NAT Traversal</strong>: Automatic via QUIC protocol extensions</li>
+<li><strong>Address Discovery</strong>: Learn your external address from peers via OBSERVED_ADDRESS frames</li>
 </ol>
-<pre><code class="language-bash">cargo run -- 127.0.0.1:9000
-</code></pre>
-<ol start="2">
-<li>Start client nodes:</li>
-</ol>
-<pre><code class="language-bash">cargo run -- 127.0.0.1:0
-</code></pre>
 <h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
 <ul>
-<li>Add user input handling</li>
-<li>Implement proper message formatting</li>
-<li>Add peer discovery</li>
-<li>Explore NAT traversal features</li>
+<li><a href="./configuration.html">Configuration</a> - Learn about all configuration options</li>
+<li><a href="./nat-traversal.html">NAT Traversal</a> - Understanding NAT traversal in depth</li>
+<li><a href="./examples.html">Examples</a> - More complete examples</li>
+<li><a href="./api-reference.html">API Reference</a> - Full API documentation</li>
 </ul>
 
                     </main>
