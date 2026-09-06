@@ -49,6 +49,8 @@
 //! }
 //! ```
 
+mod socket_binding;
+
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -3080,27 +3082,27 @@ impl P2pEndpoint {
 
         use crate::high_level::runtime::AsyncUdpSocket;
 
-        // Socket strategy: try dual-socket (separate IPv4 + IPv6) first for maximum
-        // platform compatibility. Fall back to single-socket dual-stack, then IPv4 only.
-        let requested_port = config
+        // An explicit interface must be bound exactly. Wildcard and default
+        // configurations retain the dual-socket compatibility fallback ladder.
+        let requested_addr = config
             .bind_addr
             .as_ref()
-            .and_then(|addr| addr.as_socket_addr())
-            .map(|addr| addr.port())
-            .unwrap_or(0);
+            .and_then(|addr| addr.as_socket_addr());
 
         // Track DualStackSocket for local_addrs() API
         let mut _dual_stack_ref: Option<
             std::sync::Arc<crate::high_level::runtime::dual_stack::DualStackSocket>,
         > = None;
 
-        // Try dual-socket first (separate IPv4 + IPv6 sockets)
-        let mut inner = match crate::transport::UdpTransport::bind_dual_stack_for_endpoint(
-            requested_port,
+        let sockets = socket_binding::bind(
+            requested_addr,
+            crate::transport::UdpTransport::bind_dual_stack_for_endpoint,
+            crate::transport::UdpTransport::bind_for_quinn,
         )
         .await
-        {
-            Ok((_transport, dual_socket)) => {
+        .map_err(|e| EndpointError::Config(format!("Failed to bind UDP socket: {e}")))?;
+        let mut inner = match sockets {
+            socket_binding::BoundSocket::Dual((_transport, dual_socket)) => {
                 let (v4_addr, v6_addr) = dual_socket.local_addrs();
                 info!(
                     "Bound dual-socket: IPv4={}, IPv6={} (true dual-stack, separate sockets)",
@@ -3144,44 +3146,7 @@ impl P2pEndpoint {
                 .await
                 .map_err(|e| EndpointError::Config(e.to_string()))?
             }
-            Err(e) => {
-                // Fall back to single-socket approach
-                info!("Dual-socket failed ({e}), falling back to single-socket");
-
-                let dual_stack_default: std::net::SocketAddr = std::net::SocketAddr::new(
-                    std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-                    requested_port,
-                );
-                let ipv4_fallback: std::net::SocketAddr = std::net::SocketAddr::new(
-                    std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                    requested_port,
-                );
-                let bind_addr = config
-                    .bind_addr
-                    .as_ref()
-                    .and_then(|addr| addr.as_socket_addr())
-                    .unwrap_or(dual_stack_default);
-
-                let (_transport, quinn_socket) =
-                    match crate::transport::UdpTransport::bind_for_quinn(bind_addr).await {
-                        Ok(result) => result,
-                        Err(e2) if bind_addr == dual_stack_default => {
-                            info!("Single-socket dual-stack failed ({e2}), falling back to IPv4");
-                            crate::transport::UdpTransport::bind_for_quinn(ipv4_fallback)
-                                .await
-                                .map_err(|e3| {
-                                    EndpointError::Config(format!(
-                                        "All socket binds failed (dual: {e}, v6: {e2}, v4: {e3})"
-                                    ))
-                                })?
-                        }
-                        Err(e2) => {
-                            return Err(EndpointError::Config(format!(
-                                "Failed to bind UDP socket: {e2}"
-                            )));
-                        }
-                    };
-
+            socket_binding::BoundSocket::Single((_transport, quinn_socket)) => {
                 let actual_bind_addr = quinn_socket.local_addr().map_err(|e2| {
                     EndpointError::Config(format!("Failed to get local address: {e2}"))
                 })?;
