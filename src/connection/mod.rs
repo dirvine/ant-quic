@@ -1092,6 +1092,7 @@ impl Connection {
                     ) {
                         return None;
                     }
+                    buf.write(token);
                     self.stats.frame_tx.path_response += 1;
                     // RFC 9000 §8.2.2: an off-path PATH_RESPONSE must be padded to at least the
                     // smallest allowed maximum datagram size — not the larger PQC handshake floor,
@@ -1407,6 +1408,7 @@ impl Connection {
         // smallest allowed maximum datagram size — not the larger PQC handshake floor
         // (ant-quic#270).
         builder.pad_to(MIN_INITIAL_SIZE);
+        builder.finish_and_track(now, self, None, buf);
 
         // Mark coordination as validating after packet is built
         if let Some(nat_traversal) = &mut self.nat_traversal {

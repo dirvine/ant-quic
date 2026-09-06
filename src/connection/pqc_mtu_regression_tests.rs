@@ -26,8 +26,6 @@
 //! (no sockets — loopback MTUs would hide the defect) and assert the invariant at the
 //! `Transmit` boundary.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -216,7 +214,7 @@ fn pump(now: crate::Instant, peer: &mut Peer, other: &mut Peer, sizes: &mut Vec<
 
 /// Drive the pair until both report `Connected` or the round budget is exhausted, advancing
 /// the simulated clock by 25 ms whenever a round makes no progress (loss/PTO timers).
-fn drive_to_connected(client: &mut Peer, server: &mut Peer) -> Vec<usize> {
+fn drive_to_connected(client: &mut Peer, server: &mut Peer) -> (Vec<usize>, crate::Instant) {
     let mut now = crate::Instant::now();
     let mut sizes = Vec::new();
     for _ in 0..400 {
@@ -224,7 +222,7 @@ fn drive_to_connected(client: &mut Peer, server: &mut Peer) -> Vec<usize> {
         progress |= pump(now, client, server, &mut sizes);
         progress |= pump(now, server, client, &mut sizes);
         if client.connected && server.connected {
-            return sizes;
+            return (sizes, now);
         }
         if !progress {
             now += crate::Duration::from_millis(25);
@@ -237,7 +235,7 @@ fn drive_to_connected(client: &mut Peer, server: &mut Peer) -> Vec<usize> {
             }
         }
     }
-    sizes
+    (sizes, now)
 }
 
 fn make_peer_pair() -> (Peer, Peer) {
@@ -280,7 +278,7 @@ fn make_peer_pair() -> (Peer, Peer) {
 #[test]
 fn pqc_handshake_datagrams_stay_within_1200_bytes() {
     let (mut client, mut server) = make_peer_pair();
-    let sizes = drive_to_connected(&mut client, &mut server);
+    let (sizes, _) = drive_to_connected(&mut client, &mut server);
 
     assert!(
         client.connected && server.connected,
@@ -400,4 +398,107 @@ fn packet_builder_pad_to_is_capped_at_datagram_capacity() {
     assert_eq!(buf.len(), MIN_INITIAL_SIZE);
     // Sanity: the padded datagram starts with an Initial long header (both header bits set).
     assert_eq!(buf[0] & 0xc0, 0xc0);
+}
+
+/// Off-path responses must preserve the challenge, not let zero padding become its payload.
+#[test]
+fn off_path_response_echoes_token_and_validates_peer_path() {
+    let (mut client, mut server) = make_peer_pair();
+    let (_, now) = drive_to_connected(&mut client, &mut server);
+    assert!(client.connected && server.connected);
+    let candidate = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4444);
+    let token = 0x0123_4567_89ab_cdef;
+
+    let client_conn = client.conn.as_mut().unwrap();
+    client_conn.nat_traversal = None;
+    assert_ne!(candidate, client_conn.path.remote);
+    client_conn.path_responses = super::paths::PathResponses::default();
+    client_conn.path_responses.push(0, token, candidate);
+    let mut buf = Vec::with_capacity(65_536);
+    let transmit = client_conn.poll_transmit(now, 1, &mut buf).unwrap();
+    assert_eq!(transmit.destination, candidate);
+    assert_eq!(transmit.size, MIN_INITIAL_SIZE);
+    assert_eq!(transmit.segment_size, None);
+
+    // Feed the actual encrypted datagram through the peer's endpoint and connection.
+    // Its outstanding nonzero token is the oracle, independent of sender-side counters.
+    let server_conn = server.conn.as_mut().unwrap();
+    server_conn.path.challenge = Some(token);
+    server_conn.path.validated = false;
+    let source = server_conn.path.remote;
+    ingress(
+        now,
+        BytesMut::from(&buf[..transmit.size]),
+        source,
+        &mut server,
+    );
+    let server_conn = server.conn.as_ref().unwrap();
+    assert_eq!(
+        server_conn.path.challenge, None,
+        "peer must accept echoed token"
+    );
+    assert!(server_conn.path.validated);
+}
+
+/// A coordinated punch must be a finished, authenticated packet before it is returned.
+#[test]
+fn coordinated_path_challenge_is_padded_and_decoded_by_peer() {
+    use super::nat_traversal::{CoordinationPhase, NatTraversalState, PunchTarget};
+
+    let (mut client, mut server) = make_peer_pair();
+    let (_, now) = drive_to_connected(&mut client, &mut server);
+    assert!(client.connected && server.connected);
+    let token = 0xfedc_ba98_7654_3210;
+    let client_conn = client.conn.as_mut().unwrap();
+    let destination = client_conn.path.remote;
+    let mut nat = NatTraversalState::new(4, crate::Duration::from_secs(10));
+    nat.prime_passive_coordination_target(
+        crate::VarInt::from_u32(1),
+        PunchTarget {
+            remote_addr: destination,
+            remote_sequence: crate::VarInt::from_u32(1),
+            challenge: token,
+        },
+        now,
+    )
+    .unwrap();
+    assert_eq!(
+        nat.get_coordination_phase(),
+        Some(CoordinationPhase::Preparing)
+    );
+    client_conn.nat_traversal = Some(nat);
+    let now = now + crate::Duration::from_millis(500);
+    let mut buf = Vec::with_capacity(65_536);
+    let transmit = client_conn.poll_transmit(now, 1, &mut buf).unwrap();
+    assert_eq!(transmit.destination, destination);
+    assert_eq!(transmit.segment_size, None);
+    assert_eq!(
+        client_conn
+            .nat_traversal
+            .as_ref()
+            .unwrap()
+            .get_coordination_phase(),
+        Some(CoordinationPhase::Validating)
+    );
+
+    let server_conn = server.conn.as_mut().unwrap();
+    server_conn.path_responses = super::paths::PathResponses::default();
+    let source = server_conn.path.remote;
+    ingress(
+        now,
+        BytesMut::from(&buf[..transmit.size]),
+        source,
+        &mut server,
+    );
+    assert_eq!(
+        server
+            .conn
+            .as_mut()
+            .unwrap()
+            .path_responses
+            .pop_on_path(source),
+        Some(token),
+        "peer must authenticate and decode the coordinated challenge"
+    );
+    assert_eq!(transmit.size, MIN_INITIAL_SIZE);
 }
