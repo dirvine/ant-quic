@@ -11931,6 +11931,92 @@ mod tests {
         assert!(err.to_string().contains("not found"));
     }
 
+    #[cfg(all(feature = "platform-verifier", feature = "network-discovery"))]
+    fn explicit_bind_test_config(addr: SocketAddr, cache: &std::path::Path) -> P2pConfig {
+        P2pConfig::builder()
+            .bind_addr(addr)
+            .mdns_enabled(false)
+            .nat(crate::NatConfig {
+                enable_relay_fallback: false,
+                ..Default::default()
+            })
+            .port_mapping_enabled(false)
+            .bootstrap_cache(
+                BootstrapCacheConfig::builder()
+                    .cache_dir(cache)
+                    .persist(false)
+                    .build(),
+            )
+            .build()
+            .expect("isolated explicit-bind config")
+    }
+
+    #[cfg(all(feature = "platform-verifier", feature = "network-discovery"))]
+    #[tokio::test]
+    async fn explicit_bind_endpoint_reports_requested_ip_and_allocated_port() {
+        for ip in [
+            IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+        ] {
+            let cache = tempfile::tempdir().expect("private cache directory");
+            let requested = SocketAddr::new(ip, 0);
+            let endpoint = timeout(
+                Duration::from_secs(10),
+                P2pEndpoint::new(explicit_bind_test_config(requested, cache.path())),
+            )
+            .await
+            .expect("endpoint creation deadline")
+            .expect("loopback endpoint binds");
+            let actual = endpoint.local_addr().expect("bound socket address");
+            // An independent OS bind proves the reported nonzero port belongs
+            // to a live socket, rather than merely echoing the requested hint.
+            let conflict = std::net::UdpSocket::bind(actual).err().map(|e| e.kind());
+            endpoint.shutdown().await;
+            drop(endpoint);
+            assert_eq!(actual.ip(), requested.ip(), "explicit IP must be preserved");
+            assert_ne!(actual.port(), 0, "report the OS-allocated port");
+            assert_eq!(conflict, Some(std::io::ErrorKind::AddrInUse));
+        }
+    }
+
+    #[cfg(all(feature = "platform-verifier", feature = "network-discovery"))]
+    #[tokio::test]
+    async fn explicit_bind_endpoint_rejects_occupied_address_without_widening() {
+        for ip in [
+            IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+        ] {
+            let cache = tempfile::tempdir().expect("private cache directory");
+            let sentinel = std::net::UdpSocket::bind(SocketAddr::new(ip, 0))
+                .expect("own the occupied loopback socket");
+            let requested = sentinel.local_addr().expect("sentinel address");
+            let result = timeout(
+                Duration::from_secs(10),
+                P2pEndpoint::new(explicit_bind_test_config(requested, cache.path())),
+            )
+            .await
+            .expect("occupied bind deadline");
+            let rejected_at_bind = match result {
+                Err(EndpointError::Config(message)) => {
+                    message.starts_with("Failed to bind UDP socket:")
+                }
+                Ok(endpoint) => {
+                    endpoint.shutdown().await;
+                    false
+                }
+                Err(_) => false,
+            };
+            assert!(
+                rejected_at_bind,
+                "occupied explicit address must fail at the socket bind"
+            );
+            assert_eq!(
+                sentinel.local_addr().expect("sentinel remains owned"),
+                requested
+            );
+        }
+    }
+
     #[tokio::test]
     async fn test_endpoint_creation() {
         // v0.13.0+: No role - all nodes are symmetric P2P nodes
