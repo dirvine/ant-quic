@@ -87,6 +87,7 @@ use crate::crypto::raw_public_keys::key_utils::{
 use crate::happy_eyeballs::{self, HappyEyeballsConfig};
 use crate::mdns::{MdnsPeerRecord, MdnsRuntimeEvent, MdnsSnapshot, spawn_mdns_runtime};
 pub use crate::nat_traversal_api::TraversalPhase;
+use crate::nat_traversal_api::UNAUTHENTICATED_GENERATION;
 use crate::nat_traversal_api::{
     ConstrainedEventWithAddr, IncomingAckBidiStream, NatTraversalEndpoint, NatTraversalError,
     NatTraversalEvent, PeerId, TraversalFailureReason,
@@ -827,10 +828,10 @@ pub struct P2pEndpoint {
     direct_path_statuses: Arc<ParkingRwLock<HashMap<PeerId, DirectPathStatus>>>,
 
     /// Channel sender for data received from QUIC reader tasks and constrained poller
-    data_tx: mpsc::Sender<(PeerId, Vec<u8>)>,
+    data_tx: mpsc::Sender<(PeerId, u64, Vec<u8>)>,
 
     /// Channel receiver for data received from QUIC reader tasks and constrained poller
-    data_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(PeerId, Vec<u8>)>>>,
+    data_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(PeerId, u64, Vec<u8>)>>>,
 
     /// Configured `data_tx` capacity (preserved for diagnostics; the
     /// `mpsc::Sender` only exposes remaining free slots).
@@ -3338,6 +3339,7 @@ impl P2pEndpoint {
                             let Some(IncomingAckBidiStream {
                                 peer_id,
                                 conn_stable_id,
+                                generation,
                                 send,
                                 recv,
                                 prefix,
@@ -3356,6 +3358,7 @@ impl P2pEndpoint {
                                 &event_tx,
                                 peer_id,
                                 conn_stable_id,
+                                generation,
                                 send,
                                 recv,
                                 prefix,
@@ -6225,7 +6228,7 @@ impl P2pEndpoint {
         ack_request_dedupe: &Arc<AckRequestDedupeCache>,
         connected_peers: &Arc<RwLock<HashMap<PeerId, PeerConnection>>>,
         peer_activity: &Arc<RwLock<HashMap<PeerId, PeerActivityRecord>>>,
-        data_tx: &mpsc::Sender<(PeerId, Vec<u8>)>,
+        data_tx: &mpsc::Sender<(PeerId, u64, Vec<u8>)>,
         data_tx_diagnostics: &DataChannelDiagnostics,
         data_tx_capacity: usize,
         event_tx: &broadcast::Sender<P2pEvent>,
@@ -6238,6 +6241,7 @@ impl P2pEndpoint {
         connection: &crate::high_level::Connection,
         peer_id: PeerId,
         conn_stable_id: usize,
+        generation: u64,
         mut send: crate::high_level::SendStream,
         mut recv: crate::high_level::RecvStream,
         max_read_bytes: usize,
@@ -6287,6 +6291,7 @@ impl P2pEndpoint {
                 &event_tx,
                 peer_id,
                 conn_stable_id,
+                generation,
                 send,
                 recv,
                 prefix,
@@ -6363,12 +6368,13 @@ impl P2pEndpoint {
         ack_request_dedupe: &AckRequestDedupeCache,
         connected_peers: &Arc<RwLock<HashMap<PeerId, PeerConnection>>>,
         peer_activity: &Arc<RwLock<HashMap<PeerId, PeerActivityRecord>>>,
-        data_tx: &mpsc::Sender<(PeerId, Vec<u8>)>,
+        data_tx: &mpsc::Sender<(PeerId, u64, Vec<u8>)>,
         data_tx_diagnostics: &DataChannelDiagnostics,
         data_tx_capacity: usize,
         event_tx: &broadcast::Sender<P2pEvent>,
         peer_id: PeerId,
         conn_stable_id: usize,
+        generation: u64,
         send: crate::high_level::SendStream,
         mut recv: crate::high_level::RecvStream,
         prefix: Vec<u8>,
@@ -6492,6 +6498,7 @@ impl P2pEndpoint {
             data_tx_diagnostics,
             data_tx_capacity,
             peer_id,
+            generation,
             payload.to_vec(),
         )
         .await;
@@ -6585,10 +6592,11 @@ impl P2pEndpoint {
     }
 
     async fn admit_ack_requested_payload(
-        data_tx: &mpsc::Sender<(PeerId, Vec<u8>)>,
+        data_tx: &mpsc::Sender<(PeerId, u64, Vec<u8>)>,
         data_tx_diagnostics: &DataChannelDiagnostics,
         data_tx_capacity: usize,
         peer_id: PeerId,
+        generation: u64,
         payload: Vec<u8>,
     ) -> Result<(), ReceiveRejectReason> {
         // Sample channel pressure pre-reserve so high-water events are
@@ -6596,7 +6604,7 @@ impl P2pEndpoint {
         data_tx_diagnostics.observe_capacity(data_tx.capacity(), data_tx_capacity);
         match timeout(ACK_RECEIVE_ADMISSION_TIMEOUT, data_tx.reserve()).await {
             Ok(Ok(permit)) => {
-                permit.send((peer_id, payload));
+                permit.send((peer_id, generation, payload));
                 Ok(())
             }
             Ok(Err(_closed)) => Err(ReceiveRejectReason::ConsumerGone),
@@ -7151,7 +7159,7 @@ impl P2pEndpoint {
     ///
     /// Generates a fresh request id and delegates to
     /// [`P2pEndpoint::send_with_receive_ack_with_request_id`]. Callers that need
-    /// to issue more than one [`send_with_receive_ack`] for the same logical
+    /// to issue more than one [`Self::send_with_receive_ack`] for the same logical
     /// payload — e.g. application-level request hedging — should use the
     /// `_with_request_id` variant directly and supply the same id to every call
     /// so the receiver dedupes the duplicates instead of delivering them twice.
@@ -7167,10 +7175,10 @@ impl P2pEndpoint {
             .await
     }
 
-    /// Same contract as [`send_with_receive_ack`] but the caller supplies the
+    /// Same contract as [`Self::send_with_receive_ack`] but the caller supplies the
     /// ACK-v2 request id. Two calls with the same `(peer_id, request_id, data)`
     /// are duplicate-safe at the receiver: the second arrival is replayed from
-    /// the receiver-side [`AckRequestDedupeCache`], the cached ACK is returned
+    /// the receiver-side `AckRequestDedupeCache`, the cached ACK is returned
     /// on the wire, and the payload is **not** redelivered to `recv()`.
     ///
     /// Intended for application-level request hedging (x0x X0X-0066): the caller
@@ -7894,6 +7902,19 @@ impl P2pEndpoint {
     ///
     /// Returns `EndpointError::ShuttingDown` if the endpoint is shutting down.
     pub async fn recv(&self) -> Result<(PeerId, Vec<u8>), EndpointError> {
+        self.recv_with_generation()
+            .await
+            .map(|(peer, _, data)| (peer, data))
+    }
+
+    /// Receive data with the process-local generation captured by its connection reader.
+    ///
+    /// Shares a queue with [`Self::recv`]; each message is consumed exactly once.
+    /// `u64::MAX` means stale pre-authentication data or unproven provenance (including
+    /// constrained transports). It is never allocated to a tracked QUIC connection.
+    /// A queued generation can be older than [`Self::current_connection_generation`].
+    /// Returns [`EndpointError::ShuttingDown`] when the endpoint shuts down.
+    pub async fn recv_with_generation(&self) -> Result<(PeerId, u64, Vec<u8>), EndpointError> {
         if self.shutdown.is_cancelled() {
             return Err(EndpointError::ShuttingDown);
         }
@@ -7903,7 +7924,15 @@ impl P2pEndpoint {
             let mut pending = self.pending_data.write().await;
             pending.cleanup_expired();
 
-            if let Some((peer_id, data)) = pending.pop_any() {
+            if let Some((peer_id, generation, data)) = pending.pop_any_with_generation() {
+                // Only invalidate the insertion-time stamp; never upgrade old bytes
+                // to a new session by looking up its generation after dequeue.
+                let generation = if self.current_connection_generation(&peer_id) == Some(generation)
+                {
+                    generation
+                } else {
+                    UNAUTHENTICATED_GENERATION
+                };
                 let data_len = data.len();
                 tracing::trace!(
                     "Received {} bytes from peer {:?} (from pending buffer)",
@@ -7936,7 +7965,7 @@ impl P2pEndpoint {
                     );
                 }
 
-                return Ok((peer_id, data));
+                return Ok((peer_id, generation, data));
             }
         }
 
@@ -7950,6 +7979,12 @@ impl P2pEndpoint {
             },
             _ = self.shutdown.cancelled() => Err(EndpointError::ShuttingDown),
         }
+    }
+
+    /// Generation of the currently live, open QUIC connection, if one is tracked.
+    /// This is a snapshot, not provenance for data returned by [`Self::recv`].
+    pub fn current_connection_generation(&self, peer: &PeerId) -> Option<u64> {
+        self.inner.current_connection_generation(peer)
     }
 
     // === Application byte-streams ============================================
@@ -9294,6 +9329,11 @@ impl P2pEndpoint {
         let generation = lifecycle_snapshot
             .map(|snapshot| snapshot.generation)
             .unwrap_or(conn_stable_id as u64);
+        // Keep receive provenance separate from the reader-management fallback
+        // stable_id: only a lifecycle allocation can identify authenticated data.
+        let recv_generation = lifecycle_snapshot
+            .map(|snapshot| snapshot.generation)
+            .unwrap_or(UNAUTHENTICATED_GENERATION);
         let cancel = CancellationToken::new();
         if let Some(snapshot) = lifecycle_snapshot {
             debug!(
@@ -9395,6 +9435,7 @@ impl P2pEndpoint {
                             &connection,
                             peer_id,
                             conn_stable_id,
+                            recv_generation,
                             send,
                             recv,
                             max_read_bytes,
@@ -9609,7 +9650,7 @@ impl P2pEndpoint {
             // counters even when the eventual `send().await` succeeds
             // after a brief block (X0X-0039).
             data_tx_diagnostics.observe_capacity(data_tx.capacity(), data_tx_capacity);
-            if data_tx.send((peer_id, payload)).await.is_err() {
+            if data_tx.send((peer_id, recv_generation, payload)).await.is_err() {
                 debug!(
                     "Reader task for peer {:?}: channel closed, exiting",
                     peer_id
@@ -9882,7 +9923,11 @@ impl P2pEndpoint {
                         // events on the constrained ingress path are visible
                         // alongside the QUIC reader-task path (X0X-0039).
                         data_tx_diagnostics.observe_capacity(data_tx.capacity(), data_tx_capacity);
-                        if data_tx.send((peer_id, data)).await.is_err() {
+                        if data_tx
+                            .send((peer_id, UNAUTHENTICATED_GENERATION, data))
+                            .await
+                            .is_err()
+                        {
                             debug!("Constrained poller: channel closed, exiting");
                             break;
                         }
@@ -10469,6 +10514,75 @@ mod tests {
     #[cfg(all(test, feature = "network-discovery"))]
     use crate::nat_traversal_api::tracked_connection_for_test;
 
+    #[cfg(feature = "network-discovery")]
+    #[tokio::test]
+    async fn recv_generation_pending_data_reconnect_invalidates_old_stamp() {
+        let (a, b, _connection) = loopback_quic_pair().await;
+        let peer = b.peer_id();
+        let old = a
+            .current_connection_generation(&peer)
+            .expect("live generation");
+        a.pending_data
+            .write()
+            .await
+            .push_with_generation(&peer, old, b"pre-auth".to_vec())
+            .expect("buffer");
+        a.disconnect(&peer).await.expect("disconnect");
+        // The first close may already have reached the remote reader.
+        assert!(matches!(
+            b.disconnect(&a.peer_id()).await,
+            Ok(()) | Err(EndpointError::PeerNotFound(_))
+        ));
+        assert_eq!(a.current_connection_generation(&peer), None);
+        tokio::time::timeout(Duration::from_secs(10), a.connect_addr(shim_addr(&b)))
+            .await
+            .expect("reconnect timeout")
+            .expect("reconnect");
+        let new = a
+            .current_connection_generation(&peer)
+            .expect("new live generation");
+        assert!(new > old);
+        let (sender, generation, data) = a.recv_with_generation().await.expect("drain");
+        assert_eq!(sender, peer);
+        assert_eq!(data, b"pre-auth");
+        assert_eq!(generation, UNAUTHENTICATED_GENERATION);
+        assert_ne!(
+            Some(generation),
+            a.current_connection_generation(&peer),
+            "stale pre-auth bytes cannot match a live session for legacy admission"
+        );
+        a.pending_data
+            .write()
+            .await
+            .push_with_generation(&peer, new, b"current".to_vec())
+            .expect("buffer current");
+        assert_eq!(
+            a.recv_with_generation().await.expect("current drain"),
+            (peer, new, b"current".to_vec())
+        );
+        a.pending_data
+            .write()
+            .await
+            .push(&peer, b"unproven".to_vec())
+            .expect("legacy insertion");
+        assert_eq!(
+            a.recv_with_generation().await.expect("unproven drain").1,
+            UNAUTHENTICATED_GENERATION
+        );
+        a.disconnect(&peer).await.expect("disconnect");
+        a.pending_data
+            .write()
+            .await
+            .push_with_generation(&peer, new, vec![1])
+            .expect("buffer closed");
+        assert_eq!(
+            a.recv_with_generation().await.expect("closed drain").1,
+            UNAUTHENTICATED_GENERATION
+        );
+        let _ = a.shutdown().await;
+        let _ = b.shutdown().await;
+    }
+
     fn collect_broadcast_events(
         events: &mut tokio::sync::broadcast::Receiver<P2pEvent>,
     ) -> Vec<P2pEvent> {
@@ -10506,14 +10620,22 @@ mod tests {
         // payload fills the queue; the second reserve cannot complete in
         // ACK_RECEIVE_ADMISSION_TIMEOUT and increments high_water_count.
         let capacity = 1usize;
-        let (tx, _rx) = mpsc::channel::<(PeerId, Vec<u8>)>(capacity);
+        let (tx, _rx) = mpsc::channel::<(PeerId, u64, Vec<u8>)>(capacity);
         let diags = DataChannelDiagnostics::default();
         let peer_id = PeerId([0x33; 32]);
         // Pre-fill so the next reserve must wait.
-        tx.send((peer_id, vec![0u8; 8])).await.expect("first send");
-        let admission =
-            P2pEndpoint::admit_ack_requested_payload(&tx, &diags, capacity, peer_id, vec![1u8; 8])
-                .await;
+        tx.send((peer_id, 1, vec![0u8; 8]))
+            .await
+            .expect("first send");
+        let admission = P2pEndpoint::admit_ack_requested_payload(
+            &tx,
+            &diags,
+            capacity,
+            peer_id,
+            1,
+            vec![1u8; 8],
+        )
+        .await;
         assert!(matches!(admission, Err(ReceiveRejectReason::Backpressured)));
         assert!(
             diags.high_water_count() >= 1,

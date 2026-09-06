@@ -722,7 +722,7 @@ impl Node {
             .map_err(NodeError::Endpoint)
     }
 
-    /// Same as [`send_with_receive_ack`] but the caller supplies the ACK-v2
+    /// Same as [`Self::send_with_receive_ack`] but the caller supplies the ACK-v2
     /// request id. Repeated calls with the same `(peer_id, request_id, data)`
     /// are duplicate-safe at the receiver — the second arrival is replayed
     /// from the receiver-side ACK dedupe cache and the payload is not
@@ -788,6 +788,26 @@ impl Node {
     /// Receive data from any peer
     pub async fn recv(&self) -> Result<(PeerId, Vec<u8>), NodeError> {
         self.inner.recv().await.map_err(NodeError::Endpoint)
+    }
+
+    /// Receive data with the process-local generation of the connection that read it.
+    ///
+    /// Shares a queue with [`Self::recv`]. A reconnect does not change the stamp
+    /// on queued bytes. `u64::MAX` denotes stale pre-authentication data or data
+    /// without proven QUIC lifecycle provenance and must not authorize a session.
+    pub async fn recv_with_generation(&self) -> Result<(PeerId, u64, Vec<u8>), NodeError> {
+        self.inner
+            .recv_with_generation()
+            .await
+            .map_err(NodeError::Endpoint)
+    }
+
+    /// Generation of the currently live, open QUIC connection for `peer`, if any.
+    ///
+    /// Generations share the namespace returned by [`Self::recv_with_generation`].
+    /// This snapshot must not be used to stamp previously received data.
+    pub fn current_connection_generation(&self, peer: &PeerId) -> Option<u64> {
+        self.inner.current_connection_generation(peer)
     }
 
     // === Application byte-streams ============================================
