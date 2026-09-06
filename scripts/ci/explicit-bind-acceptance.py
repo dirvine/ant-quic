@@ -19,7 +19,8 @@ CASES = ('explicit_ipv4_port_zero_matches_kernel_and_status',
 
 
 def digest(path):
-    return hashlib.file_digest(Path(path).open('rb'), 'sha256').hexdigest()
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def git(*args, cwd=None):
@@ -44,6 +45,51 @@ def state():
             'test_sha256': digest(TEST), 'lock_sha256': digest('Cargo.lock')}
 
 
+def fresh_build_env(root, variant):
+    # Exclusive target roots are the boundary between the two source variants.
+    target = root / f'{variant}-target'
+    target.mkdir(mode=0o700)
+    return target, dict(os.environ, CARGO_TARGET_DIR=str(target), CARGO_INCREMENTAL='0')
+
+
+def artifact_custody(metadata, artifacts, cwd, target):
+    manifest = (cwd / 'Cargo.toml').resolve()
+    packages = [row for row in metadata['packages']
+                if Path(row['manifest_path']).resolve() == manifest]
+    if len(packages) != 1 or Path(metadata['target_directory']).resolve() != target.resolve():
+        raise RuntimeError('unexpected package manifest or shared Cargo target')
+    package = packages[0]
+    selected = {}
+    for name, kind, source in [('ant_quic', 'lib', cwd / 'src/lib.rs'),
+                               ('explicit_bind_acceptance', 'test', cwd / TEST)]:
+        rows = [row for row in artifacts if row.get('reason') == 'compiler-artifact'
+                and row['target']['name'] == name and kind in row['target']['kind']]
+        if len(rows) != 1:
+            raise RuntimeError('expected exactly one package library and test artifact')
+        row = rows[0]
+        if (row['package_id'] != package['id'] or row.get('fresh') is not False
+                or Path(row['target']['src_path']).resolve() != source.resolve()):
+            raise RuntimeError('artifact source identity or compilation freshness mismatch')
+        paths = set(row['filenames'])
+        if kind == 'test':
+            if not row.get('executable'):
+                raise RuntimeError('missing test executable')
+            paths.add(row['executable'])
+        if not paths or (kind == 'lib' and not any(path.endswith('.rlib') for path in paths)):
+            raise RuntimeError('missing compiled library files')
+        hashes = {}
+        for raw in sorted(paths):
+            path = Path(raw).resolve(strict=True)
+            if not path.is_relative_to(target.resolve()) or not path.is_file():
+                raise RuntimeError('artifact is outside its exclusive target')
+            hashes[str(path)] = digest(path)
+        selected[kind] = {'package_id': row['package_id'], 'src_path': row['target']['src_path'],
+                          'fresh': row['fresh'], 'files_sha256': hashes,
+                          'executable': row.get('executable')}
+    return {'manifest_path': str(manifest), 'package_id': package['id'],
+            'target_directory': str(target), 'artifacts': selected}
+
+
 def prepare(root):
     root.mkdir(mode=0o700)
     source = state()
@@ -56,9 +102,17 @@ def prepare(root):
         raise RuntimeError('baseline production source changed')
     if digest(baseline / 'Cargo.lock') != source['lock_sha256']:
         raise RuntimeError('baseline/fixed dependency graphs differ')
-    env = dict(os.environ, CARGO_TARGET_DIR=str(Path.cwd() / 'target'), CARGO_INCREMENTAL='0')
     binaries = {}
     for variant, cwd in [('baseline', baseline), ('fixed', Path.cwd())]:
+        target, env = fresh_build_env(root, variant)
+        target_identity = target.stat()
+        write(root / f'{variant}-disk-before.json', dict(shutil.disk_usage(root)._asdict()))
+        metadata_command = ['cargo', 'metadata', '--offline', '--locked', '--no-deps', '--format-version', '1']
+        with (root / f'{variant}-metadata.json').open('x') as out, (root / f'{variant}-metadata.stderr').open('x') as err:
+            result = subprocess.run(metadata_command, cwd=cwd, env=env, stdout=out, stderr=err)
+        write(root / f'{variant}-metadata-exit.json', {'command': metadata_command, 'exit': result.returncode})
+        if result.returncode:
+            raise RuntimeError(f'{variant} metadata failed; no runtime admitted')
         command = ['cargo', 'test', '--offline', '--locked', '--test', 'explicit_bind_acceptance',
                    '--no-run', '--message-format', 'json']
         with (root / f'{variant}-build.jsonl').open('x') as out, (root / f'{variant}-build.stderr').open('x') as err:
@@ -67,17 +121,40 @@ def prepare(root):
         if result.returncode:
             raise RuntimeError(f'{variant} compilation failed; no runtime admitted')
         artifacts = [json.loads(line) for line in (root / f'{variant}-build.jsonl').read_text().splitlines()]
-        paths = {row['executable'] for row in artifacts if row.get('reason') == 'compiler-artifact'
-                 and row['target']['name'] == 'explicit_bind_acceptance'
-                 and 'test' in row['target']['kind'] and row.get('executable')}
-        if len(paths) != 1:
-            raise RuntimeError('expected exactly one Cargo-reported acceptance executable')
+        metadata_path = root / f'{variant}-metadata.json'
+        custody = artifact_custody(json.loads(metadata_path.read_text()), artifacts, cwd, target)
+        custody['metadata_sha256'] = digest(metadata_path)
+        custody['build_jsonl_sha256'] = digest(root / f'{variant}-build.jsonl')
         binary = root / f'{variant}-tests'
-        shutil.copyfile(paths.pop(), binary)
+        original = custody['artifacts']['test']['executable']
+        with binary.open('xb') as out, Path(original).open('rb') as source_binary:
+            shutil.copyfileobj(source_binary, out)
         binary.chmod(0o700)
-        binaries[variant] = {'path': str(binary), 'sha256': digest(binary), 'source': git('rev-parse', 'HEAD', cwd=cwd)}
+        if digest(binary) != custody['artifacts']['test']['files_sha256'][str(Path(original).resolve())]:
+            raise RuntimeError('test snapshot hash differs from compiler artifact')
+        custody['snapshot'] = {'path': str(binary), 'sha256': digest(binary)}
+        write(root / f'{variant}-custody.json', custody)
+        write(root / f'{variant}-disk-after.json', dict(shutil.disk_usage(root)._asdict()))
+        binaries[variant] = dict(custody['snapshot'], source=git('rev-parse', 'HEAD', cwd=cwd),
+                                custody_sha256=digest(root / f'{variant}-custody.json'))
         if digest(cwd / TEST) != source['test_sha256'] or digest(cwd / 'Cargo.lock') != source['lock_sha256']:
             raise RuntimeError('build input custody changed')
+        if variant == 'baseline':
+            # Keep the independently hashed executable and all custody evidence;
+            # discard only this newly created compiler root before the second cold build.
+            current = target.stat()
+            if (target.is_symlink() or (current.st_dev, current.st_ino)
+                    != (target_identity.st_dev, target_identity.st_ino)
+                    or target != root / 'baseline-target'
+                    or digest(binary) != custody['snapshot']['sha256']
+                    or digest(metadata_path) != custody['metadata_sha256']
+                    or digest(root / f'{variant}-build.jsonl') != custody['build_jsonl_sha256']):
+                raise RuntimeError('baseline target cleanup custody mismatch')
+            shutil.rmtree(target)
+            write(root / 'baseline-target-cleanup.json', {'target': str(target),
+                  'removed': not target.exists(), 'snapshot_sha256': digest(binary),
+                  'custody_sha256': digest(root / 'baseline-custody.json'),
+                  'disk_after': dict(shutil.disk_usage(root)._asdict())})
     if state() != source:
         raise RuntimeError('fixed source custody changed')
     write(root / 'provenance.json', dict(source=source, binaries=binaries,
@@ -110,7 +187,9 @@ def run(root):
     receipt = json.loads((root / 'provenance.json').read_text())
     if state() != receipt['source']:
         raise RuntimeError('source custody changed before runtime')
-    for binary in receipt['binaries'].values():
+    for variant, binary in receipt['binaries'].items():
+        if digest(root / f'{variant}-custody.json') != binary['custody_sha256']:
+            raise RuntimeError('build custody receipt changed before runtime')
         if digest(binary['path']) != binary['sha256']:
             raise RuntimeError('binary custody changed before runtime')
     cases = [('baseline', case) for case in CASES[:2]] + [('fixed', case) for case in CASES]
@@ -181,8 +260,11 @@ def collect(root):
         finally:
             os.close(fd)
 
-    names = ['provenance.json', 'outcome.json', 'baseline-build.jsonl', 'baseline-build.stderr',
+    names = ['provenance.json', 'outcome.json', 'baseline-target-cleanup.json', 'baseline-build.jsonl', 'baseline-build.stderr',
              'baseline-build-exit.json', 'fixed-build.jsonl', 'fixed-build.stderr', 'fixed-build-exit.json']
+    names += [f'{variant}-{suffix}' for variant in ('baseline', 'fixed')
+              for suffix in ('metadata.json', 'metadata.stderr', 'metadata-exit.json',
+                             'custody.json', 'disk-before.json', 'disk-after.json')]
     names += [f'case-{index}.{suffix}' for index in range(5) for suffix in ('json', 'stdout', 'stderr')]
     for name in names:
         path = root / name
