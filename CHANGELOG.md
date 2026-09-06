@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.49] - 2026-09-06
+
 ### Fixed
 
 - **RFC 9000 §14 compliance: PQC handshakes no longer rely on IP fragmentation (#270, x0x#505).**
@@ -23,9 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path MTU. PQ handshake volume continues to flow as multiple ≤MTU datagrams of split CRYPTO
   frames; the server's first flight was ~95% padding, not key material. Regression tests drive
   a full PQC handshake through the low-level state machines and assert every transmit fits
-  1200 bytes (fails on the pre-fix code with three 4096-byte datagrams).
-
-
+  1200 bytes (fails on the pre-fix code with three 4096-byte datagrams). Merged as #271
+  (`c3ca46adef666e83750ec4bae160deb8c5b61094`), including PATH_RESPONSE token echo and
+  PATH_CHALLENGE finalize/encrypt repairs before merge.
 
 ## [0.27.48] - 2026-09-02
 
