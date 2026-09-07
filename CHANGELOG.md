@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.50] - 2026-09-07
+
+### Fixed
+
+- **Honor explicit `P2pConfig.bind_addr` without collapsing to a wildcard (#274).** The preferred
+  dual-stack binder previously extracted only the port from non-wildcard bind requests, so
+  `127.0.0.1:0` (and other explicit IPs) could return a wildcard IPv6 socket and advertise an
+  unusable address to consumers. Explicit IPs now go through the single-address binder with the
+  complete requested socket address; the actual bound family/address/port (including port-zero
+  allocation) is returned, and an explicit bind failure is propagated without widening.
+  `None` and wildcard requests keep the existing dual-stack and fallback behavior. Merged as
+  #274 (`d78b78f5ce6d3a8d060a7a1f6644d2d87753c463`); crates.io 0.27.49 still has the old bind
+  behavior and cannot be republished.
+
 ## [0.27.49] - 2026-09-06
 
 ### Fixed
