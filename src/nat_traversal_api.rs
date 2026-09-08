@@ -375,6 +375,152 @@ struct ObservedAddressReport {
     address: SocketAddr,
 }
 
+/// Remove only the connection observed by the caller, not a replacement
+/// installed after that observation. The caller must retain a strong handle
+/// to `observed` through this call when identity is pointer-derived.
+fn remove_observed_connection<T>(
+    connections: &dashmap::DashMap<PeerId, T>,
+    peer_id: &PeerId,
+    observed: &T,
+    identity: impl Fn(&T) -> usize,
+) -> bool {
+    let observed_id = identity(observed);
+    connections
+        .remove_if(peer_id, |_, current| identity(current) == observed_id)
+        .is_some()
+}
+
+/// Recheck emptiness and remove under the same write guard so registration
+/// cannot insert a replacement between the decision and deletion.
+fn remove_empty_lifecycle_entry<T>(
+    lifecycle: &ParkingRwLock<HashMap<PeerId, Vec<T>>>,
+    peer_id: &PeerId,
+) -> bool {
+    let mut lifecycle = lifecycle.write();
+    if lifecycle.get(peer_id).is_some_and(Vec::is_empty) {
+        lifecycle.remove(peer_id).is_some()
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod map_maintenance_tests {
+    use super::*;
+
+    fn token_id(token: &Arc<u8>) -> usize {
+        Arc::as_ptr(token) as usize
+    }
+
+    #[test]
+    fn observed_winner_removal_preserves_replacement() {
+        let peer = PeerId([1; 32]);
+        let connections = dashmap::DashMap::new();
+        connections.insert(peer, Arc::new(7));
+        // The poll snapshot keeps W alive after its map slot is replaced.
+        let observed = Arc::clone(connections.get(&peer).unwrap().value());
+        let replacement = Arc::new(7);
+        assert_ne!(token_id(&observed), token_id(&replacement));
+        connections.insert(peer, Arc::clone(&replacement));
+
+        assert!(!remove_observed_connection(
+            &connections,
+            &peer,
+            &observed,
+            token_id
+        ));
+        assert!(Arc::ptr_eq(
+            connections.get(&peer).unwrap().value(),
+            &replacement
+        ));
+    }
+
+    #[test]
+    fn observed_winner_removal_removes_unchanged_entry_once() {
+        let peer = PeerId([1; 32]);
+        let other = PeerId([2; 32]);
+        let connections = dashmap::DashMap::new();
+        let observed = Arc::new(7);
+        let unrelated = Arc::new(9);
+        connections.insert(peer, Arc::clone(&observed));
+        connections.insert(other, Arc::clone(&unrelated));
+
+        assert!(remove_observed_connection(
+            &connections,
+            &peer,
+            &observed,
+            token_id
+        ));
+        assert!(!connections.contains_key(&peer));
+        assert!(Arc::ptr_eq(
+            connections.get(&other).unwrap().value(),
+            &unrelated
+        ));
+        assert!(!remove_observed_connection(
+            &connections,
+            &peer,
+            &observed,
+            token_id
+        ));
+    }
+
+    #[test]
+    fn observed_winner_removal_preserves_unrelated_entry_when_absent() {
+        let peer = PeerId([1; 32]);
+        let other = PeerId([2; 32]);
+        let connections = dashmap::DashMap::new();
+        let observed = Arc::new(7);
+        let unrelated = Arc::new(9);
+        connections.insert(other, Arc::clone(&unrelated));
+
+        assert!(!remove_observed_connection(
+            &connections,
+            &peer,
+            &observed,
+            token_id
+        ));
+        assert!(Arc::ptr_eq(
+            connections.get(&other).unwrap().value(),
+            &unrelated
+        ));
+    }
+
+    #[test]
+    fn empty_lifecycle_removal_preserves_registration_after_empty_observation() {
+        let peer = PeerId([1; 32]);
+        let lifecycle = ParkingRwLock::new(HashMap::from([(peer, Vec::<u8>::new())]));
+        assert!(lifecycle.read().get(&peer).is_some_and(Vec::is_empty));
+        // Deterministic post-observation registration; no lock is held here.
+        lifecycle.write().insert(peer, vec![7]);
+
+        assert!(!remove_empty_lifecycle_entry(&lifecycle, &peer));
+        assert_eq!(lifecycle.read().get(&peer), Some(&vec![7]));
+    }
+
+    #[test]
+    fn empty_lifecycle_removal_removes_empty_entry_once() {
+        let peer = PeerId([1; 32]);
+        let other = PeerId([2; 32]);
+        let lifecycle =
+            ParkingRwLock::new(HashMap::from([(peer, Vec::<u8>::new()), (other, vec![9])]));
+
+        assert!(remove_empty_lifecycle_entry(&lifecycle, &peer));
+        assert!(!lifecycle.read().contains_key(&peer));
+        assert_eq!(lifecycle.read().get(&other), Some(&vec![9]));
+        assert!(!remove_empty_lifecycle_entry(&lifecycle, &peer));
+    }
+
+    #[test]
+    fn empty_lifecycle_removal_preserves_unrelated_entry_when_absent() {
+        let peer = PeerId([1; 32]);
+        let other = PeerId([2; 32]);
+        let lifecycle = ParkingRwLock::new(HashMap::from([(other, vec![9])]));
+
+        assert!(!remove_empty_lifecycle_entry(&lifecycle, &peer));
+        assert_eq!(lifecycle.read().get(&other), Some(&vec![9]));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct TrackedConnection {
     connection: InnerConnection,
@@ -7452,15 +7598,7 @@ impl NatTraversalEndpoint {
         let Some(replacement_index) = replacement_index else {
             drop(lifecycle);
             self.finalize_orphan_closures(peer_id, orphan_closures);
-            // Re-check emptiness under a fresh guard.
-            if self
-                .connection_lifecycle
-                .read()
-                .get(peer_id)
-                .is_some_and(Vec::is_empty)
-            {
-                self.connection_lifecycle.write().remove(peer_id);
-            }
+            remove_empty_lifecycle_entry(&self.connection_lifecycle, peer_id);
             return None;
         };
 
@@ -9111,12 +9249,23 @@ impl NatTraversalEndpoint {
                 entry
                     .value()
                     .close_reason()
-                    .map(|reason| (*entry.key(), reason.clone()))
+                    // Keep the observed allocation alive until guarded removal;
+                    // an integer stable_id alone could outlive that allocation.
+                    .map(|reason| (*entry.key(), entry.value().clone(), reason.clone()))
             })
             .collect();
 
-        for (peer_id, reason) in closed_connections {
-            self.connections.remove(&peer_id);
+        for (peer_id, observed, reason) in closed_connections {
+            if !remove_observed_connection(
+                &self.connections,
+                &peer_id,
+                &observed,
+                InnerConnection::stable_id,
+            ) {
+                continue;
+            }
+            // Report only the winner we actually removed. Registration after
+            // removal can still race this event; it is not a generation barrier.
             self.emit_event(
                 events,
                 NatTraversalEvent::ConnectionLost {
